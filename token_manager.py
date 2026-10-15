@@ -24,11 +24,66 @@ def _clean_error_message(msg: Any) -> str:
     text = str(msg)
     if "?" in text:
         text = text.split("?")[0]
-    # Filter kata kunci sensitif jika ada
-    for sensitive in ["client_secret", "access_token", "refresh_token", "secret"]:
-        if sensitive in text.lower():
-            return "Terjadi kesalahan respon dari provider OAuth."
+    # Samarkan nilai rahasia ASLI jika sampai muncul. Pesan error dari provider
+    # (misalnya "client_secret is incorrect") tetap ditampilkan supaya bisa didiagnosis.
+    for secret in (INSTAGRAM_APP_SECRET, TIKTOK_CLIENT_SECRET):
+        if secret:
+            text = text.replace(secret, "***")
     return text[:200]
+
+
+def _tiktok_token_payload(res_json: Any) -> Dict[str, Any]:
+    """
+    Respons token TikTok Login Kit v2 berbentuk DATAR (access_token, open_id, dst. di level atas),
+    tanpa pembungkus "data". Bentuk terbungkus tetap diterima untuk berjaga-jaga.
+    Mengembalikan {} jika respons bukan token yang valid.
+    """
+    if not isinstance(res_json, dict):
+        return {}
+    if res_json.get("access_token"):
+        return res_json
+    wrapped = res_json.get("data")
+    if isinstance(wrapped, dict) and wrapped.get("access_token"):
+        return wrapped
+    return {}
+
+
+def _extract_tiktok_error(res_json: Any) -> str:
+    """Mengekstrak pesan error dari berbagai kemungkinan format respon API TikTok."""
+    if not isinstance(res_json, dict):
+        return str(res_json)[:200]
+    
+    # 1. Cek data.description (format resmi TikTok Display API / Login Kit v2)
+    data = res_json.get("data")
+    if isinstance(data, dict):
+        desc = data.get("description")
+        err_code = data.get("error_code")
+        if desc:
+            return f"{desc} (code: {err_code})" if err_code else str(desc)
+
+    # 2. Cek error.message atau error.code
+    err = res_json.get("error")
+    if isinstance(err, dict):
+        msg = err.get("message")
+        code = err.get("code")
+        if msg and code and code != "ok":
+            return f"{code}: {msg}"
+        elif msg:
+            return str(msg)
+        elif code and code != "ok":
+            return f"Error code: {code}"
+    elif isinstance(err, str) and err:
+        desc = res_json.get("error_description")
+        return f"{err}: {desc}" if desc else err
+
+    # 3. Cek error_description atau message di level root
+    if res_json.get("error_description"):
+        return str(res_json["error_description"])
+    if res_json.get("message"):
+        return str(res_json["message"])
+
+    # Jangan cetak isi respons (bisa memuat token); cukup nama kunci untuk diagnosis.
+    return f"Respon TikTok tidak dikenali (kunci: {', '.join(list(res_json.keys())[:8])})"
 
 
 def exchange_instagram_code(code: str, redirect_uri: str) -> Dict[str, Any]:
@@ -155,10 +210,11 @@ def exchange_tiktok_code(code: str, redirect_uri: str) -> Dict[str, Any]:
 
     token_url = "https://open.tiktokapis.com/v2/oauth/token/"
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    clean_code = code.split("#")[0].strip()
     payload = {
         "client_key": TIKTOK_CLIENT_KEY,
         "client_secret": TIKTOK_CLIENT_SECRET,
-        "code": code,
+        "code": clean_code,
         "grant_type": "authorization_code",
         "redirect_uri": redirect_uri
     }
@@ -169,12 +225,11 @@ def exchange_tiktok_code(code: str, redirect_uri: str) -> Dict[str, Any]:
     except Exception as e:
         raise OAuthError(f"Gagal menghubungi server TikTok ({e.__class__.__name__}).")
 
-    # Format respon TikTok v2 membungkus payload di dalam "data"
-    token_data = res_json.get("data", {})
-    error_data = res_json.get("error", {})
+    # Respon token TikTok v2 berbentuk datar (lihat _tiktok_token_payload)
+    token_data = _tiktok_token_payload(res_json)
 
-    if resp.status_code != 200 or not token_data.get("access_token"):
-        raw_err = error_data.get("message") or res_json.get("message", "Gagal menukar kode TikTok.")
+    if resp.status_code != 200 or not token_data:
+        raw_err = _extract_tiktok_error(res_json)
         raise OAuthError(f"TikTok OAuth error: {_clean_error_message(raw_err)}")
 
     access_token = token_data["access_token"]
@@ -324,8 +379,8 @@ def get_valid_token(platform: str) -> str:
                     return access_token
                 raise OAuthError(f"Gagal menghubungi endpoint refresh TikTok ({e.__class__.__name__}).")
 
-            token_data = res_json.get("data", {})
-            if resp.status_code == 200 and token_data.get("access_token"):
+            token_data = _tiktok_token_payload(res_json)
+            if resp.status_code == 200 and token_data:
                 new_access = token_data["access_token"]
                 new_refresh = token_data.get("refresh_token", refresh_token)
                 new_expires_in = int(token_data.get("expires_in", 86400))
@@ -342,7 +397,7 @@ def get_valid_token(platform: str) -> str:
                 )
                 return new_access
             else:
-                raw_err = res_json.get("error", {}).get("message", "Gagal merefresh token TikTok")
+                raw_err = _extract_tiktok_error(res_json)
                 raise OAuthError(f"TikTok refresh error: {_clean_error_message(raw_err)}")
 
         return access_token
