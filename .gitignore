@@ -3,3 +3,6 @@ tokens.db
 .streamlit/secrets.toml
 .venv/
 __pycache__/
+cloudflared.exe
+tiktok*.txt
+app_icon.png
