@@ -106,6 +106,7 @@ class TestCore(unittest.TestCase):
             os.path.join("src", "token_manager.py"),
             os.path.join("src", "fetcher.py"),
             os.path.join("src", "cookie_manager.py"),
+            os.path.join("src", "instagram_cookie_manager.py"),
             os.path.join("tests", "__init__.py"),
             os.path.join("tests", "test_core.py")
         ]
