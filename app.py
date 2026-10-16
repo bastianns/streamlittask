@@ -29,6 +29,17 @@ from src.cookie_manager import (
     CookieAuthError
 )
 
+import src.instagram_cookie_manager
+importlib.reload(src.instagram_cookie_manager)
+
+from src.instagram_cookie_manager import (
+    save_instagram_cookie_session,
+    capture_instagram_cookies_via_browser,
+    get_instagram_cookie_headers,
+    delete_ig_cookie_txt_file,
+    IGCookieAuthError
+)
+
 
 # Gunakan ikon aplikasi di folder assets jika tersedia
 icon_path = os.path.join(BASE_DIR, "assets", "app_icon.png")
@@ -126,11 +137,13 @@ if "code" in params and "state" in params:
 # =========================================================================
 # 2. TAB UTAMA: INSTAGRAM & TIKTOK
 # =========================================================================
-tab_ig, tab_tt, tab_tt_cookie = st.tabs([
+tab_ig, tab_ig_cookie, tab_tt, tab_tt_cookie = st.tabs([
     "📸 Instagram (Business / Creator)",
+    "🍪 Instagram (Cookie Session)",
     "🎵 TikTok (Login Kit v2)",
     "🍪 TikTok (Cookie Session)"
 ])
+
 
 
 # -------------------------------------------------------------------------
@@ -454,3 +467,113 @@ with tab_tt_cookie:
                 storage.delete_token("tiktok_cookie")
                 delete_cookie_txt_file()
                 st.rerun()
+
+# -------------------------------------------------------------------------
+# TAB INSTAGRAM COOKIE SESSION (TAMBAHAN BARU)
+# -------------------------------------------------------------------------
+with tab_ig_cookie:
+    st.subheader("Instagram Session Cookie (Non-OAuth / Web Session)")
+    st.write(
+        "Gunakan opsi ini jika Anda memerlukan akses sesi web langsung (`sessionid` / kuki) "
+        "untuk keperluan bot atau scraping, yang disimpan secara terenkripsi menggunakan Fernet (AES-128) di SQLite."
+    )
+
+    ig_cookie_meta = storage.get_token_metadata("instagram_cookie")
+
+    if not ig_cookie_meta:
+        col_auto_ig, col_manual_ig = st.columns(2)
+
+        with col_auto_ig:
+            st.markdown("#### 🖥️ Opsi 1: Login via Browser (Playwright)")
+            st.caption(
+                "Membuka jendela browser Chromium lokal. Silakan login ke Instagram seperti biasa, "
+                "dan aplikasi akan otomatis mengekstrak cookie begitu Anda masuk."
+            )
+            if st.button("🚀 Buka Browser & Ambil Cookie Instagram", type="primary", key="btn_pw_ig_cookie"):
+                try:
+                    with st.spinner("Menunggu Anda menyelesaikan login di jendela browser (Maks 3 menit)..."):
+                        capture_instagram_cookies_via_browser()
+                    st.success("🎉 Cookie session Instagram berhasil ditangkap dan dienkripsi!")
+                    st.rerun()
+                except IGCookieAuthError as ce:
+                    st.error(f"❌ Gagal: {str(ce)}")
+
+        with col_manual_ig:
+            st.markdown("#### 📋 Opsi 2: Input Manual (`sessionid`)")
+            st.caption(
+                "Buka `instagram.com` di browser -> Tekan **F12 (Application > Cookies)** -> "
+                "Salin nilai dari cookie bernama **`sessionid`**."
+            )
+            with st.form("form_manual_ig_cookie"):
+                custom_label_ig = st.text_input("Label / Username Akun", value="MyInstagramAccount")
+                raw_sessionid_ig = st.text_input("Nilai Cookie `sessionid` Instagram", type="password")
+                submitted_ig = st.form_submit_button("💾 Enkripsi & Simpan Cookie Instagram")
+
+                if submitted_ig:
+                    try:
+                        save_instagram_cookie_session(
+                            sessionid=raw_sessionid_ig,
+                            username=custom_label_ig
+                        )
+                        st.success("🎉 Cookie Instagram berhasil disimpan secara terenkripsi!")
+                        st.rerun()
+                    except IGCookieAuthError as ce:
+                        st.error(f"❌ {str(ce)}")
+    else:
+        st.markdown('<span class="badge-active">● COOKIE INSTAGRAM AKTIF</span>', unsafe_allow_html=True)
+        exp_time_ig_ck = datetime.datetime.fromtimestamp(ig_cookie_meta["expires_at"]).strftime("%Y-%m-%d %H:%M:%S")
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Label Akun", ig_cookie_meta.get("username", "-"))
+        col2.metric("Tipe Kredensial", "Web Session Cookies")
+        col3.metric("Estimasi Kedaluwarsa", exp_time_ig_ck)
+
+        ig_ck_data = get_instagram_cookie_headers()
+
+        st.divider()
+        st.markdown("### 📋 1. Nilai `sessionid` Instagram")
+        st.code(ig_ck_data["sessionid"], language="text")
+
+        st.markdown("### 🌐 2. Header `Cookie` Lengkap (Siap untuk Python / Scraper / Requests)")
+        st.code(ig_ck_data["cookie_str"], language="http")
+
+        with st.expander("🧩 3. Format JSON untuk Ekstensi 'Cookie-Editor'"):
+            import json
+            st.code(json.dumps([
+                {
+                    "domain": ".instagram.com",
+                    "hostOnly": False,
+                    "httpOnly": (k in ["sessionid", "mid", "ds_user_id", "csrftoken"]),
+                    "name": k,
+                    "path": "/",
+                    "sameSite": "no_restriction",
+                    "secure": True,
+                    "session": False,
+                    "value": v
+                }
+                for k, v in ig_ck_data["cookies_dict"].items()
+            ], indent=2), language="json")
+
+        ig_txt_path = ig_ck_data.get("cookie_txt_path", "")
+        st.info(f"📄 Seluruh format cookie mentah ini juga tersimpan langsung di file: **`instagram_cookie.txt`**")
+
+        c_dl_ig, c_del_ig = st.columns([1, 1])
+        with c_dl_ig:
+            ig_txt_content = ""
+            if os.path.exists(ig_txt_path):
+                with open(ig_txt_path, "r", encoding="utf-8") as f:
+                    ig_txt_content = f.read()
+            st.download_button(
+                "📥 Download File instagram_cookie.txt",
+                data=ig_txt_content,
+                file_name="instagram_cookie.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+
+        with c_del_ig:
+            if st.button("🗑️ Hapus Cookie Session Instagram", key="btn_del_ig_ck", use_container_width=True):
+                storage.delete_token("instagram_cookie")
+                delete_ig_cookie_txt_file()
+                st.rerun()
+
