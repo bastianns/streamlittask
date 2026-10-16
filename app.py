@@ -1,19 +1,30 @@
-import streamlit as st
+import os
+import sys
 import datetime
-import storage
-import config
-from token_manager import (
+import streamlit as st
+
+# Pastikan direktori root proyek berada di sys.path
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from src import storage, config
+from src.token_manager import (
     exchange_instagram_code,
     exchange_tiktok_code,
     get_valid_token,
     OAuthError
 )
-from fetcher import fetch_data, FetcherError
+from src.fetcher import fetch_data, FetcherError
+
+# Gunakan ikon aplikasi di folder assets jika tersedia
+icon_path = os.path.join(BASE_DIR, "assets", "app_icon.png")
+page_icon = icon_path if os.path.exists(icon_path) else "🔐"
 
 # --- Konfigurasi Halaman Streamlit ---
 st.set_page_config(
     page_title="Official OAuth 2.0 Hub (Instagram & TikTok)",
-    page_icon="🔐",
+    page_icon=page_icon,
     layout="wide"
 )
 

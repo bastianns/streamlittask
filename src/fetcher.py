@@ -1,7 +1,11 @@
 import time
 import requests
 from typing import Dict, Any, List, Optional
-from token_manager import get_valid_token, OAuthError
+try:
+    from src.token_manager import get_valid_token, OAuthError
+except ImportError:
+    from token_manager import get_valid_token, OAuthError
+
 
 class FetcherError(Exception):
     """Exception khusus untuk error pengambilan data dari API resmi."""

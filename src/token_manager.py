@@ -1,13 +1,23 @@
 import time
 import requests
 from typing import Dict, Any, Optional
-import storage
-from config import (
-    INSTAGRAM_APP_ID,
-    INSTAGRAM_APP_SECRET,
-    TIKTOK_CLIENT_KEY,
-    TIKTOK_CLIENT_SECRET,
-)
+try:
+    from src import storage
+    from src.config import (
+        INSTAGRAM_APP_ID,
+        INSTAGRAM_APP_SECRET,
+        TIKTOK_CLIENT_KEY,
+        TIKTOK_CLIENT_SECRET,
+    )
+except ImportError:
+    import storage
+    from config import (
+        INSTAGRAM_APP_ID,
+        INSTAGRAM_APP_SECRET,
+        TIKTOK_CLIENT_KEY,
+        TIKTOK_CLIENT_SECRET,
+    )
+
 
 class OAuthError(Exception):
     """Exception khusus untuk error autentikasi OAuth."""

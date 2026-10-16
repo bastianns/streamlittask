@@ -3,9 +3,13 @@ import os
 import time
 from typing import Optional, Dict, Any
 from cryptography.fernet import Fernet
-from config import TOKEN_ENCRYPTION_KEY
+try:
+    from src.config import TOKEN_ENCRYPTION_KEY, BASE_DIR
+except ImportError:
+    from config import TOKEN_ENCRYPTION_KEY, BASE_DIR
 
-DB_FILE = os.path.join(os.path.dirname(__file__), "tokens.db")
+DB_FILE = os.environ.get("TOKENS_DB_PATH", os.path.join(BASE_DIR, "tokens.db"))
+
 
 def _get_cipher() -> Fernet:
     """Mengembalikan objek Fernet untuk enkripsi dan dekripsi token."""

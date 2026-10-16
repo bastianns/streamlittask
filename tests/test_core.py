@@ -11,8 +11,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-import config
-import storage
+from src import config, storage
+
 
 
 class TestCore(unittest.TestCase):
@@ -100,12 +100,15 @@ class TestCore(unittest.TestCase):
         """Memastikan seluruh file sumber python proyek bebas dari kesalahan sintaksis."""
         files_to_compile = [
             "app.py",
-            "config.py",
-            "storage.py",
-            "token_manager.py",
-            "fetcher.py",
-            "tests/test_core.py"
+            os.path.join("src", "__init__.py"),
+            os.path.join("src", "config.py"),
+            os.path.join("src", "storage.py"),
+            os.path.join("src", "token_manager.py"),
+            os.path.join("src", "fetcher.py"),
+            os.path.join("tests", "__init__.py"),
+            os.path.join("tests", "test_core.py")
         ]
+
         
         for rel_path in files_to_compile:
             full_path = os.path.join(BASE_DIR, rel_path)

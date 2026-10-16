@@ -86,14 +86,19 @@ D:\streamlit\
 ├── .streamlit/
 │   ├── secrets.toml            # Konfigurasi kredensial lokal (diabaikan oleh git)
 │   └── secrets.toml.example    # Template secrets dengan placeholder aman
+├── assets/
+│   └── app_icon.png            # Icon visual aplikasi Streamlit
+├── src/
+│   ├── __init__.py             # Inisialisasi package src
+│   ├── config.py               # Konfigurasi, penandatangan & verifikasi HMAC, URL builder
+│   ├── storage.py              # Skema SQLite (tokens.db) & fungsi enkripsi/dekripsi Fernet
+│   ├── token_manager.py        # Pertukaran kode OAuth & get_valid_token(platform)
+│   └── fetcher.py              # Modul pemanggilan API resmi Instagram & TikTok
 ├── tests/
+│   ├── __init__.py             # Inisialisasi package tests
 │   └── test_core.py            # Unit test HMAC state, enkripsi token, dan py_compile
 ├── .env.example                # Template variabel lingkungan alternatif
-├── .gitignore                  # Mengabaikan tokens.db, .env, secrets.toml, .venv, __pycache__
-├── config.py                   # Konfigurasi, penandatangan & verifikasi HMAC, URL builder
-├── storage.py                  # Skema SQLite (tokens.db) & fungsi enkripsi/dekripsi Fernet
-├── token_manager.py            # Pertukaran kode OAuth & get_valid_token(platform)
-├── fetcher.py                  # Modul pemanggilan API resmi Instagram & TikTok
+├── .gitignore                  # Mengabaikan tokens.db, .env, secrets.toml, .venv, __pycache__, binary
 ├── app.py                      # UI Streamlit (Tab Instagram & TikTok, OAuth callback handling)
 ├── requirements.txt            # Daftar pustaka dependensi (streamlit, cryptography, requests, dll.)
 ├── run.bat                     # Skrip peluncur instan untuk Windows
@@ -113,7 +118,7 @@ Pengujian dijalankan melalui suite `tests/test_core.py` menggunakan Python 3.10 
 3. **`verify_signed_state` Manipulasi Tanda Tangan**: Memastikan modifikasi 1 karakter sekalipun pada tanda tangan HMAC langsung ditolak (anti-CSRF/tampering).
 4. **Roundtrip Enkripsi/Dekripsi Fernet**: Memastikan token acak yang dienkripsi menghasilkan ciphertext yang aman dan dapat didekripsi kembali persis seperti aslinya.
 5. **Penanganan Token Kosong**: Memastikan input string kosong tidak menyebabkan crash atau kegagalan program.
-6. **Kompilasi Sintaksis (`py_compile`)**: Seluruh file proyek (`app.py`, `config.py`, `storage.py`, `token_manager.py`, `fetcher.py`, `tests/test_core.py`) terkompilasi tanpa error sintaksis.
+6. **Kompilasi Sintaksis (`py_compile`)**: Seluruh file proyek (`app.py`, `src/`, `tests/`) terkompilasi tanpa error sintaksis.
 7. **Pemisahan Error Pengambilan Data**: Modul `fetcher.py` telah diperbarui untuk mengembalikan `media_error` dan `videos_error` secara eksplisit, dan `app.py` menampilkannya via `st.warning`.
 
 ### ⚠️ Apa yang BELUM Diuji (Alur Produksi Langsung)

@@ -7,7 +7,11 @@ from typing import Tuple, Optional, Dict, Any
 from urllib.parse import urlencode
 from dotenv import load_dotenv
 
-# Muat file .env jika ada
+# Direktori root proyek
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Muat file .env jika ada di direktori root atau cwd
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 load_dotenv()
 
 # Helper untuk membaca konfigurasi dari st.secrets atau environment variables
