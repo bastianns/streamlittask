@@ -44,12 +44,12 @@ if not STATE_SIGNING_SECRET:
 # Kredensial Instagram (Meta for Developers - Instagram API with Instagram Login)
 INSTAGRAM_APP_ID = get_config_val("INSTAGRAM_APP_ID", "")
 INSTAGRAM_APP_SECRET = get_config_val("INSTAGRAM_APP_SECRET", "")
-INSTAGRAM_REDIRECT_URI = get_config_val("INSTAGRAM_REDIRECT_URI", "http://localhost:8501/")
+INSTAGRAM_REDIRECT_URI = get_config_val("INSTAGRAM_REDIRECT_URI", "https://bastian-tiktok-app.streamlit.app/")
 
 # Kredensial TikTok (TikTok for Developers - Login Kit v2)
 TIKTOK_CLIENT_KEY = get_config_val("TIKTOK_CLIENT_KEY", "")
 TIKTOK_CLIENT_SECRET = get_config_val("TIKTOK_CLIENT_SECRET", "")
-TIKTOK_REDIRECT_URI = get_config_val("TIKTOK_REDIRECT_URI", "http://localhost:8501/")
+TIKTOK_REDIRECT_URI = get_config_val("TIKTOK_REDIRECT_URI", "https://bastian-tiktok-app.streamlit.app/")
 
 
 def generate_signed_state(platform: str, secret_key: Optional[str] = None) -> str:
