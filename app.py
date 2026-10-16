@@ -8,11 +8,26 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+import pandas as pd
+
+import importlib
+import src.storage
+importlib.reload(src.storage)
+import src.token_manager
+importlib.reload(src.token_manager)
+import src.fetcher
+importlib.reload(src.fetcher)
+
 from src import storage, config
 from src.token_manager import (
     exchange_instagram_code,
     exchange_tiktok_code,
     get_valid_token,
+    test_tiktok_refresh_token,
+    save_manual_tiktok_tokens,
+    delete_tiktok_token_file,
+    export_tiktok_token_to_json,
+    TIKTOK_TOKEN_JSON_FILE,
     OAuthError
 )
 from src.fetcher import fetch_data, FetcherError
@@ -93,7 +108,7 @@ st.warning(
     "Token akses dienkripsi dengan standar *AES-128 (Fernet)* di database lokal SQLite dan tidak pernah di-log."
 )
 
-st.title("🔐 Multi-Platform Official OAuth Hub")
+st.title("🔐 Multi-Platform Official OAuth Hubb")
 st.caption("Hubungkan akun resmi Instagram (Business/Creator) dan TikTok untuk sinkronisasi data langsung via API resmi.")
 
 # =========================================================================
@@ -252,13 +267,24 @@ with tab_ig:
 # TAB TIKTOK
 # -------------------------------------------------------------------------
 with tab_tt:
-    st.subheader("TikTok Login Kit v2 & Display API")
+    st.subheader("🎵 TikTok Login Kit v2 & Analytics Hub")
     st.write(
-        "Autentikasi resmi untuk akun **TikTok**. "
-        "Menggunakan scope `user.info.basic`, `user.info.profile`, dan `video.list` untuk mengambil data profil dan video milik akun sendiri."
+        "Autentikasi resmi untuk akun **TikTok** dengan fitur analitik lengkap dan alat pengujian "
+        "langsung endpoint refresh token (`https://open.tiktokapis.com/v2/oauth/token/`)."
     )
 
     tt_meta = storage.get_token_metadata("tiktok")
+    tt_record = storage.get_token_record("tiktok") if tt_meta else None
+
+    # Sinkronisasikan token ke .tiktok_token.json jika sudah terhubung
+    if tt_record and tt_record.get("access_token") and tt_record.get("refresh_token"):
+        export_tiktok_token_to_json(
+            access_token=tt_record["access_token"],
+            refresh_token=tt_record["refresh_token"],
+            open_id=tt_record.get("account_id", ""),
+            scope=tt_record.get("scopes", ""),
+            expires_at=tt_record.get("expires_at")
+        )
 
     if not tt_meta:
         # Belum terhubung
@@ -267,11 +293,11 @@ with tab_tt:
             st.markdown("""
             **Aturan & Kebijakan TikTok for Developers:**
             * Otorisasi langsung melalui portal resmi TikTok Login Kit v2.
-            * Tidak ada form username/password atau kode OTP SMS di aplikasi ini.
-            * Access token berlaku selama 24 jam dan refresh token berlaku hingga 365 hari. Modul sistem otomatis memperbarui token saat hampir kedaluwarsa.
+            * Token dienkripsi dengan standar AES-128 di database dan otomatis diekspor ke `.tiktok_token.json`.
+            * Access token berlaku 24 jam dan refresh token berlaku hingga 365 hari.
             """)
             if not config.TIKTOK_CLIENT_KEY or not config.TIKTOK_CLIENT_SECRET:
-                st.info("ℹ️ Kredensial `TIKTOK_CLIENT_KEY` dan `TIKTOK_CLIENT_SECRET` belum diisi di `.streamlit/secrets.toml` atau `.env`. Harap isi untuk menguji koneksi langsung ke TikTok.")
+                st.info("ℹ️ Kredensial `TIKTOK_CLIENT_KEY` dan `TIKTOK_CLIENT_SECRET` belum diisi di `.streamlit/secrets.toml` atau `.env`.")
 
         with col_action_tt:
             state_token_tt = config.generate_signed_state("tiktok")
@@ -282,9 +308,42 @@ with tab_tt:
                 type="primary",
                 help="Buka halaman otorisasi OAuth 2.0 resmi TikTok Login Kit"
             )
+
+        # OPSI ALTERNATIF INPUT MANUAL JIKA REDIRECT KE LINK LAIN (misal google.com)
+        with st.expander("🛠️ Opsi Alternatif: Masukkan Authorization Code atau Token Manual"):
+            st.caption(
+                "Gunakan opsi ini jika redirect URI Anda mengarah ke halaman eksternal (misalnya `https://google.com/?code=...`) "
+                "atau jika Anda sudah memiliki token sebelumnya."
+            )
+            subcol1, subcol2 = st.columns(2)
+            with subcol1:
+                st.markdown("##### 📥 Tukar Code Manual dari Redirect URL")
+                with st.form("form_manual_tt_code"):
+                    manual_code = st.text_input("Authorization Code (dari parameter `code=...`)", placeholder="Contoh: v2.xxxxx")
+                    custom_redirect = st.text_input("Redirect URI yang Digunakan", value=config.TIKTOK_REDIRECT_URI)
+                    submit_code = st.form_submit_button("⚡ Tukar Code Menjadi Token")
+                    if submit_code and manual_code.strip():
+                        try:
+                            with st.spinner("Menukar authorization code ke endpoint TikTok..."):
+                                res = exchange_tiktok_code(manual_code.strip(), custom_redirect.strip())
+                                st.success(f"🎉 Berhasil menghubungkan akun TikTok @{res.get('username')}!")
+                                st.rerun()
+                        except OAuthError as oe:
+                            st.error(f"Gagal: {str(oe)}")
+            with subcol2:
+                st.markdown("##### 🔑 Impor Access & Refresh Token")
+                with st.form("form_manual_tt_token"):
+                    man_access = st.text_input("Access Token", type="password")
+                    man_refresh = st.text_input("Refresh Token", type="password")
+                    man_account = st.text_input("Open ID / Label Akun", value="Akun TikTok")
+                    submit_token = st.form_submit_button("💾 Simpan & Hubungkan")
+                    if submit_token and man_access.strip() and man_refresh.strip():
+                        save_manual_tiktok_tokens(man_access.strip(), man_refresh.strip(), username=man_account.strip())
+                        st.success("🎉 Token berhasil disimpan!")
+                        st.rerun()
     else:
         # Sudah terhubung
-        st.markdown('<span class="badge-active">● TERHUBUNG</span>', unsafe_allow_html=True)
+        st.markdown('<span class="badge-active">● TIKTOK TERHUBUNG</span>', unsafe_allow_html=True)
         exp_time_tt = datetime.datetime.fromtimestamp(tt_meta["expires_at"]).strftime("%Y-%m-%d %H:%M:%S")
 
         col1, col2, col3 = st.columns(3)
@@ -292,11 +351,113 @@ with tab_tt:
         col2.metric("Open ID", tt_meta.get("account_id", "-"))
         col3.metric("Masa Berlaku Access Token", exp_time_tt)
 
-        st.caption(f"🔒 Token tersimpan dalam keadaan terenkripsi Fernet (SQLite). Scope: `{tt_meta.get('scopes')}`")
+        # -------------------------------------------------------------
+        # PANEL TOKEN & AUTH INFO (ALA TIKTOKANALYTICS)
+        # -------------------------------------------------------------
+        st.markdown("### 🔑 Token & Auth Info (Siap Salin & Unduh)")
+        st.caption(
+            "Nilai token mentah (plaintext) siap disalin untuk pengujian atau integrasi. "
+            "Token ini juga otomatis tersimpan di file **`.tiktok_token.json`**."
+        )
 
+        acc_token_val = tt_record.get("access_token", "") if tt_record else ""
+        ref_token_val = tt_record.get("refresh_token", "") if tt_record else ""
+
+        t_col1, t_col2 = st.columns(2)
+        with t_col1:
+            st.markdown("##### 🔄 Refresh Token (Masa Berlaku ~365 Hari)")
+            st.code(ref_token_val, language="text")
+        with t_col2:
+            st.markdown("##### ⚡ Access Token (Masa Berlaku ~24 Jam)")
+            st.code(acc_token_val, language="text")
+
+        with st.expander("🔍 Detail Lengkap Token & Status File"):
+            st.json({
+                "access_token": acc_token_val,
+                "refresh_token": ref_token_val,
+                "open_id": tt_meta.get("account_id"),
+                "scope": tt_meta.get("scopes"),
+                "expires_at": tt_meta.get("expires_at"),
+                "expires_at_readable": exp_time_tt,
+                "token_json_file": os.path.abspath(TIKTOK_TOKEN_JSON_FILE)
+            })
+            if os.path.exists(TIKTOK_TOKEN_JSON_FILE):
+                with open(TIKTOK_TOKEN_JSON_FILE, "r", encoding="utf-8") as f:
+                    file_contents = f.read()
+                st.download_button(
+                    label="📥 Unduh .tiktok_token.json",
+                    data=file_contents,
+                    file_name=".tiktok_token.json",
+                    mime="application/json"
+                )
+
+        # -------------------------------------------------------------
+        # ALAT PENGUJIAN LANGSUNG REFRESH TOKEN KE TIKTOK API
+        # -------------------------------------------------------------
+        st.markdown("### 🧪 Uji Panggil Endpoint Refresh Token (`https://open.tiktokapis.com/v2/oauth/token/`)")
+        st.caption(
+            "Klik tombol di bawah untuk menguji panggilan langsung ke server resmi TikTok menggunakan refresh token Anda. "
+            "Hasil respons HTTP, headers, dan JSON token baru akan ditampilkan langsung secara transparan."
+        )
+
+        test_col1, test_col2 = st.columns([1, 1])
+        with test_col1:
+            if st.button("🚀 Uji / Panggil Endpoint Refresh Token Sekarang", type="primary", key="btn_test_refresh"):
+                try:
+                    with st.spinner("Mengirim permintaan POST ke https://open.tiktokapis.com/v2/oauth/token/..."):
+                        test_result = test_tiktok_refresh_token(ref_token_val)
+                        st.session_state["tt_refresh_test_result"] = test_result
+                except Exception as ex:
+                    st.error(f"❌ Panggilan gagal: {str(ex)}")
+
+        with test_col2:
+            st.info("💡 Setiap kali refresh berhasil, TikTok akan memberikan access token baru dan refresh token baru yang otomatis diperbarui di aplikasi.")
+
+        # Tampilkan hasil test jika ada di session_state
+        if "tt_refresh_test_result" in st.session_state:
+            res_test = st.session_state["tt_refresh_test_result"]
+            st.markdown("#### 📡 Hasil Respons Resmi Server TikTok:")
+
+            status_color = "🟢" if res_test.get("is_success") else "🔴"
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Status Kode HTTP", f"{status_color} {res_test.get('status_code')}")
+            m2.metric("Waktu Respon", f"{res_test.get('elapsed_ms')} ms")
+            m3.metric("Status Validasi", "SUKSES ✅" if res_test.get("is_success") else "GAGAL ❌")
+
+            st.markdown("**Respons JSON Mentah dari Endpoint:**")
+            st.json(res_test.get("response_json"))
+
+            if res_test.get("is_success"):
+                st.success("🎉 Panggilan ke `https://open.tiktokapis.com/v2/oauth/token/` BERHASIL! Token baru telah disimpan dan disinkronkan.")
+
+            with st.expander("📋 Perintah cURL & Snippet Python (Siap Eksekusi di Terminal / Postman)"):
+                st.markdown("**Perintah cURL:**")
+                st.code(res_test.get("curl_command", ""), language="bash")
+                st.markdown("**Kode Python (Requests):**")
+                py_snippet = (
+                    "import requests\n\n"
+                    "url = 'https://open.tiktokapis.com/v2/oauth/token/'\n"
+                    "data = {\n"
+                    f"    'client_key': '{config.TIKTOK_CLIENT_KEY}',\n"
+                    f"    'client_secret': '{config.TIKTOK_CLIENT_SECRET}',\n"
+                    "    'grant_type': 'refresh_token',\n"
+                    f"    'refresh_token': '{ref_token_val}'\n"
+                    "}\n"
+                    "headers = {'Content-Type': 'application/x-www-form-urlencoded'}\n"
+                    "response = requests.post(url, headers=headers, data=data)\n"
+                    "print('Status:', response.status_code)\n"
+                    "print('Response:', response.json())\n"
+                )
+                st.code(py_snippet, language="python")
+
+        st.divider()
+
+        # -------------------------------------------------------------
+        # TOMBOL AKSI DATA & DISCONNECT
+        # -------------------------------------------------------------
         c_fetch_tt, c_disconnect_tt = st.columns([1, 1])
         with c_fetch_tt:
-            if st.button("🔄 Ambil Data Akun (fetch_data)", key="btn_fetch_tt"):
+            if st.button("🔄 Ambil Data Akun & Video (fetch_data)", key="btn_fetch_tt"):
                 try:
                     with st.spinner("Memanggil endpoint resmi TikTok Display API v2..."):
                         data_tt = fetch_data("tiktok")
@@ -308,11 +469,16 @@ with tab_tt:
         with c_disconnect_tt:
             if st.button("❌ Putuskan Sambungan Akun", key="btn_disc_tt"):
                 storage.delete_token("tiktok")
+                delete_tiktok_token_file()
                 if "tt_data" in st.session_state:
                     del st.session_state["tt_data"]
+                if "tt_refresh_test_result" in st.session_state:
+                    del st.session_state["tt_refresh_test_result"]
                 st.rerun()
 
-        # Tampilkan data jika sudah diambil
+        # -------------------------------------------------------------
+        # TAMPILAN DATA & ANALISIS ALA TIKTOKANALYTICS
+        # -------------------------------------------------------------
         if "tt_data" in st.session_state and st.session_state["tt_data"].get("platform") == "tiktok":
             data_tt = st.session_state["tt_data"]
             prof_tt = data_tt.get("profile", {})
@@ -324,17 +490,26 @@ with tab_tt:
             with p_col1:
                 avatar = prof_tt.get("avatar_large_url") or prof_tt.get("avatar_url")
                 if avatar:
-                    st.image(avatar, width=100)
+                    st.image(avatar, width=120)
                 else:
                     st.markdown("🖼️ *(Tidak ada foto)*")
             with p_col2:
-                st.write(f"**Display Name:** {prof_tt.get('display_name', '-')}")
-                st.write(f"**Bio:** {prof_tt.get('bio_description', '-')}")
-                st.write(f"**Terverifikasi:** {'Ya ✅' if prof_tt.get('is_verified') else 'Tidak ❌'}")
+                st.header(prof_tt.get("display_name") or tt_meta.get("username") or "TikTok Account")
+                st.caption(f"Bio: {prof_tt.get('bio_description', '-')}")
                 if prof_tt.get("profile_deep_link"):
-                    st.write(f"[Buka Profil di Aplikasi TikTok]({prof_tt.get('profile_deep_link')})")
+                    st.markdown(f"[Buka Profil di Aplikasi TikTok ↗]({prof_tt.get('profile_deep_link')})")
 
-            st.markdown("### 🎵 Video Milik Akun Sendiri")
+            # 4 Kartu Metrik ala TikTokAnalytics
+            m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+            m_col1.metric("Followers", f"{prof_tt.get('follower_count', 0):,}")
+            m_col2.metric("Following", f"{prof_tt.get('following_count', 0):,}")
+            m_col3.metric("Total Likes", f"{prof_tt.get('likes_count', 0):,}")
+            m_col4.metric("Videos", f"{prof_tt.get('video_count', len(videos_tt)):,}")
+
+            st.divider()
+
+            # VIDEO PERFORMANCE & TABEL STATISTIK
+            st.subheader("📊 Video Performance & Engagement Analytics")
             if data_tt.get("videos_error"):
                 st.warning(f"⚠️ **Peringatan Pengambilan Video:** {data_tt['videos_error']}")
 
@@ -342,16 +517,84 @@ with tab_tt:
                 if not data_tt.get("videos_error"):
                     st.info("Belum ada video ditemukan untuk akun ini.")
             else:
-                cols = st.columns(3)
-                for idx, v in enumerate(videos_tt):
-                    with cols[idx % 3]:
-                        cover = v.get("cover_image_url")
-                        if cover:
-                            st.image(cover, use_container_width=True)
-                        st.caption(f"**Judul:** {v.get('title') or v.get('video_description') or 'Video'}")
-                        st.write(f"❤️ {v.get('like_count', 0)} | 💬 {v.get('comment_count', 0)} | 👁️ {v.get('view_count', 0)}")
-                        if v.get("embed_link"):
-                            st.markdown(f"[Tonton di TikTok]({v.get('embed_link')})")
+                df = pd.DataFrame(videos_tt)
+
+                # Hitung Engagement Rate (Likes + Comments + Shares) / Views * 100
+                if "view_count" in df.columns:
+                    df["engagement_rate"] = df.apply(
+                        lambda r: (
+                            (r.get("like_count", 0) + r.get("comment_count", 0) + r.get("share_count", 0))
+                            / r["view_count"]
+                            * 100
+                        ) if r["view_count"] > 0 else 0,
+                        axis=1
+                    )
+
+                # 1. Detail Analisis per Video
+                st.markdown("#### 🔍 Detail Analisis per Video")
+                video_titles = [v.get("title") or v.get("video_description") or f"Video {v.get('id')}" for v in videos_tt]
+                selected_title = st.selectbox("Pilih Video untuk Detail Statistik:", options=video_titles, index=0)
+                selected_video = next((v for v in videos_tt if (v.get("title") or v.get("video_description") or f"Video {v.get('id')}") == selected_title), None)
+
+                if selected_video:
+                    col_v_img, col_v_detail = st.columns([1, 2])
+                    with col_v_img:
+                        if selected_video.get("cover_image_url"):
+                            st.image(selected_video["cover_image_url"], use_container_width=True)
+                    with col_v_detail:
+                        st.markdown(f"##### **{selected_title}**")
+                        if "create_time" in selected_video:
+                            try:
+                                post_date = datetime.datetime.fromtimestamp(selected_video["create_time"]).strftime('%Y-%m-%d %H:%M:%S')
+                                st.caption(f"Diposting pada: {post_date}")
+                            except Exception:
+                                pass
+                        
+                        target_link = selected_video.get("share_url") or selected_video.get("embed_link")
+                        if target_link:
+                            st.markdown(f"[Tonton Video di TikTok ↗]({target_link})")
+
+                        v_views = selected_video.get("view_count", 0)
+                        v_likes = selected_video.get("like_count", 0)
+                        v_comments = selected_video.get("comment_count", 0)
+                        v_shares = selected_video.get("share_count", 0)
+                        v_engagements = v_likes + v_comments + v_shares
+                        v_er = (v_engagements / v_views * 100) if v_views > 0 else 0
+
+                        sm1, sm2 = st.columns(2)
+                        sm1.metric("Views (Ditonton)", f"{v_views:,}")
+                        sm1.metric("Likes (Disukai)", f"{v_likes:,}")
+                        sm2.metric("Comments (Komentar)", f"{v_comments:,}")
+                        sm2.metric("Shares (Dibagikan)", f"{v_shares:,}")
+                        st.metric("Engagement Rate (ER)", f"{v_er:.2f}%")
+
+                # 2. Tabel Semua Video
+                st.markdown("#### 📋 Daftar Semua Video")
+                table_cols = ["title", "view_count", "like_count", "comment_count", "share_count", "engagement_rate", "share_url"]
+                available_cols = [c for c in table_cols if c in df.columns]
+                col_config = {
+                    "title": "Judul Video",
+                    "view_count": st.column_config.NumberColumn("Views", format="%d"),
+                    "like_count": st.column_config.NumberColumn("Likes", format="%d"),
+                    "comment_count": st.column_config.NumberColumn("Comments", format="%d"),
+                    "share_count": st.column_config.NumberColumn("Shares", format="%d"),
+                    "engagement_rate": st.column_config.NumberColumn("Engagement Rate (ER)", format="%.2f%%"),
+                    "share_url": st.column_config.LinkColumn("Link Video")
+                }
+                st.dataframe(df[available_cols], use_container_width=True, hide_index=True, column_config=col_config)
+
+                # 3. Total Performance
+                st.markdown("#### 📈 Total Performa Semua Video")
+                tot_views = df.get("view_count", pd.Series(dtype=int)).sum()
+                tot_likes = df.get("like_count", pd.Series(dtype=int)).sum()
+                tot_comments = df.get("comment_count", pd.Series(dtype=int)).sum()
+                tot_shares = df.get("share_count", pd.Series(dtype=int)).sum()
+
+                tcol1, tcol2, tcol3, tcol4 = st.columns(4)
+                tcol1.metric("Total Views", f"{tot_views:,.0f}")
+                tcol2.metric("Total Likes", f"{tot_likes:,.0f}")
+                tcol3.metric("Total Comments", f"{tot_comments:,.0f}")
+                tcol4.metric("Total Shares", f"{tot_shares:,.0f}")
 
 # -------------------------------------------------------------------------
 # TAB TIKTOK COOKIE SESSION

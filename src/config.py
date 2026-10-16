@@ -132,12 +132,12 @@ def get_instagram_auth_url(redirect_uri: str, state: str) -> str:
 def get_tiktok_auth_url(redirect_uri: str, state: str) -> str:
     """
     Menghasilkan URL Otorisasi resmi TikTok Login Kit v2.
-    Scope resmi: user.info.basic,user.info.profile,video.list
+    Scope resmi: user.info.basic,user.info.profile,user.info.stats,video.list
     """
     base_url = "https://www.tiktok.com/v2/auth/authorize/"
     params = {
         "client_key": TIKTOK_CLIENT_KEY,
-        "scope": "user.info.basic,user.info.profile,video.list",
+        "scope": "user.info.basic,user.info.profile,user.info.stats,video.list",
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "state": state

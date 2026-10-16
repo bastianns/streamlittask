@@ -11,6 +11,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+# Set dummy test keys if not already in env
+if not os.environ.get("TOKEN_ENCRYPTION_KEY"):
+    os.environ["TOKEN_ENCRYPTION_KEY"] = "p-0Fh8kEQ02eP4tgylRsGJ4qAvskQyZGD__dG9gL8OY="
+if not os.environ.get("STATE_SIGNING_SECRET"):
+    os.environ["STATE_SIGNING_SECRET"] = "test-secret-key-for-unit-testing-hmac-12345"
+
 from src import config, storage
 
 

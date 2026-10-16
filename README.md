@@ -36,19 +36,20 @@ Sesuai aturan ketat, seluruh implementasi endpoint, parameter, scope, dan masa b
 ### B. TikTok for Developers — Login Kit v2 & Display API
 * **Endpoint Otorisasi:**
   - URL: `https://www.tiktok.com/v2/auth/authorize/`
-  - Parameter: `client_key`, `scope=user.info.basic,user.info.profile,video.list`, `response_type=code`, `redirect_uri`, `state={hmac_state}`.
+  - Parameter: `client_key`, `scope=user.info.basic,user.info.profile,user.info.stats,video.list`, `response_type=code`, `redirect_uri`, `state={hmac_state}`.
 * **Endpoint Penukaran Token:**
   - `POST https://open.tiktokapis.com/v2/oauth/token/`
   - Headers: `Content-Type: application/x-www-form-urlencoded`
   - Parameter Body: `client_key`, `client_secret`, `grant_type=authorization_code`, `code`, `redirect_uri`.
   - Mengembalikan objek `data`: `access_token` (berlaku **24 jam / 86400 detik**), `refresh_token` (berlaku **365 hari / 1 tahun**), `open_id`, `scope`.
+  - Ekspor Otomatis: Token tersinkronisasi ke `.tiktok_token.json` untuk pengujian dan analitik.
 * **Aturan Refresh Token:**
   - `POST https://open.tiktokapis.com/v2/oauth/token/`
   - Parameter: `client_key`, `client_secret`, `grant_type=refresh_token`, `refresh_token={refresh_token}`.
-  - Mengembalikan `access_token` baru (24 jam) dan pasangan `refresh_token` baru.
+  - Dilengkapi fitur uji langsung (live HTTP tester) dan generator perintah cURL di antarmuka Streamlit.
 * **Endpoint Data Akun Sendiri:**
-  - Profil (Display API): `GET https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,avatar_large_url,display_name,bio_description,profile_deep_link,is_verified` (Header: `Authorization: Bearer <access_token>`).
-  - Video Milik Sendiri: `POST https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,duration,cover_image_url,like_count,comment_count,share_count,view_count` (Header: `Authorization: Bearer <access_token>`, Body JSON: `{"max_count": 10}`).
+  - Profil & Statistik: `GET https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,avatar_large_url,display_name,bio_description,profile_deep_link,is_verified,follower_count,following_count,likes_count,video_count` (Header: `Authorization: Bearer <access_token>`).
+  - Video Milik Sendiri: `POST https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,duration,cover_image_url,share_url,create_time,like_count,comment_count,share_count,view_count` (Header: `Authorization: Bearer <access_token>`, Body JSON: `{"max_count": 20}`).
 
 ---
 

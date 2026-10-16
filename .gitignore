@@ -8,3 +8,4 @@ cloudflared.exe
 tiktok*.txt
 instagram*.txt
 *_cookie.txt
+.tiktok_token.json

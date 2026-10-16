@@ -1,3 +1,5 @@
+import os
+import json
 import time
 import requests
 from typing import Dict, Any, Optional
@@ -209,6 +211,167 @@ def exchange_instagram_code(code: str, redirect_uri: str) -> Dict[str, Any]:
     }
 
 
+TIKTOK_TOKEN_JSON_FILE = os.path.join(storage.BASE_DIR, ".tiktok_token.json")
+
+
+def export_tiktok_token_to_json(
+    access_token: str,
+    refresh_token: str,
+    open_id: str = "",
+    scope: str = "",
+    expires_in: int = 86400,
+    expires_at: Optional[int] = None
+) -> str:
+    """
+    Menyimpan token TikTok ke file .tiktok_token.json (format plaintext sama persis dengan TikTokAnalytics).
+    """
+    if expires_at is None:
+        expires_at = int(time.time()) + expires_in
+    data = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "open_id": open_id,
+        "scope": scope,
+        "expires_in": expires_in,
+        "expires_at": expires_at
+    }
+    try:
+        with open(TIKTOK_TOKEN_JSON_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+    return TIKTOK_TOKEN_JSON_FILE
+
+
+def delete_tiktok_token_file() -> None:
+    """Menghapus file .tiktok_token.json saat disconnect."""
+    if os.path.exists(TIKTOK_TOKEN_JSON_FILE):
+        try:
+            os.remove(TIKTOK_TOKEN_JSON_FILE)
+        except Exception:
+            pass
+
+
+def save_manual_tiktok_tokens(
+    access_token: str,
+    refresh_token: str,
+    open_id: str = "manual_account",
+    username: str = "TikTok Account",
+    expires_in: int = 86400
+) -> Dict[str, Any]:
+    """Menyimpan token TikTok yang diinput secara manual langsung ke database dan file .tiktok_token.json."""
+    expires_at = int(time.time()) + expires_in
+    scope = "user.info.basic,user.info.profile,user.info.stats,video.list"
+    storage.save_token(
+        platform="tiktok",
+        account_id=open_id,
+        username=username,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_at=expires_at,
+        scopes=scope
+    )
+    export_tiktok_token_to_json(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        open_id=open_id,
+        scope=scope,
+        expires_in=expires_in,
+        expires_at=expires_at
+    )
+    return {
+        "platform": "tiktok",
+        "account_id": open_id,
+        "username": username,
+        "expires_at": expires_at
+    }
+
+
+def test_tiktok_refresh_token(refresh_token: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Melakukan panggilan HTTP POST langsung ke endpoint https://open.tiktokapis.com/v2/oauth/token/
+    dengan grant_type=refresh_token untuk menguji validitas refresh token secara transparan.
+    Mengembalikan detail respon lengkap (status, waktu respon, raw JSON, headers, dan cURL).
+    """
+    if not refresh_token:
+        record = storage.get_token_record("tiktok")
+        if record and record.get("refresh_token"):
+            refresh_token = record["refresh_token"]
+        else:
+            raise OAuthError("Refresh token tidak ditemukan di database maupun parameter.")
+
+    token_url = "https://open.tiktokapis.com/v2/oauth/token/"
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    payload = {
+        "client_key": TIKTOK_CLIENT_KEY,
+        "client_secret": TIKTOK_CLIENT_SECRET,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token
+    }
+
+    curl_command = (
+        f'curl -X POST "{token_url}" \\\n'
+        f'  -H "Content-Type: application/x-www-form-urlencoded" \\\n'
+        f'  -d "client_key={TIKTOK_CLIENT_KEY}" \\\n'
+        f'  -d "client_secret={TIKTOK_CLIENT_SECRET}" \\\n'
+        f'  -d "grant_type=refresh_token" \\\n'
+        f'  -d "refresh_token={refresh_token}"'
+    )
+
+    start_time = time.time()
+    try:
+        resp = requests.post(token_url, headers=headers, data=payload, timeout=20)
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        res_json = resp.json()
+    except Exception as e:
+        raise OAuthError(f"Gagal menghubungi endpoint TikTok ({e.__class__.__name__}): {str(e)}")
+
+    token_data = _tiktok_token_payload(res_json)
+    is_success = resp.status_code == 200 and bool(token_data.get("access_token"))
+
+    if is_success:
+        new_access = token_data["access_token"]
+        new_refresh = token_data.get("refresh_token", refresh_token)
+        new_expires_in = int(token_data.get("expires_in", 86400))
+        new_expires_at = int(time.time()) + new_expires_in
+        open_id = token_data.get("open_id", "")
+        scope = token_data.get("scope", "")
+
+        record = storage.get_token_record("tiktok")
+        account_id = record["account_id"] if record else open_id
+        username = record["username"] if record else open_id
+        scopes = scope or (record["scopes"] if record else "user.info.basic,user.info.profile,user.info.stats,video.list")
+
+        storage.save_token(
+            platform="tiktok",
+            account_id=account_id,
+            username=username,
+            access_token=new_access,
+            refresh_token=new_refresh,
+            expires_at=new_expires_at,
+            scopes=scopes
+        )
+        export_tiktok_token_to_json(
+            access_token=new_access,
+            refresh_token=new_refresh,
+            open_id=account_id,
+            scope=scopes,
+            expires_in=new_expires_in,
+            expires_at=new_expires_at
+        )
+
+    return {
+        "status_code": resp.status_code,
+        "elapsed_ms": elapsed_ms,
+        "is_success": is_success,
+        "headers": dict(resp.headers),
+        "response_json": res_json,
+        "curl_command": curl_command,
+        "token_data": token_data,
+        "refresh_token_used": refresh_token
+    }
+
+
 def exchange_tiktok_code(code: str, redirect_uri: str) -> Dict[str, Any]:
     """
     Menukar Authorization Code dengan Access Token & Refresh Token untuk TikTok Login Kit v2.
@@ -246,7 +409,7 @@ def exchange_tiktok_code(code: str, redirect_uri: str) -> Dict[str, Any]:
     refresh_token = token_data.get("refresh_token", "")
     expires_in = int(token_data.get("expires_in", 86400))  # Default 24 jam
     open_id = token_data.get("open_id", "")
-    scope = token_data.get("scope", "user.info.basic,user.info.profile,video.list")
+    scope = token_data.get("scope", "user.info.basic,user.info.profile,user.info.stats,video.list")
     expires_at = int(time.time()) + expires_in
 
     # Ambil display name akun sendiri
@@ -269,6 +432,15 @@ def exchange_tiktok_code(code: str, redirect_uri: str) -> Dict[str, Any]:
         refresh_token=refresh_token,
         expires_at=expires_at,
         scopes=scope
+    )
+
+    export_tiktok_token_to_json(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        open_id=open_id,
+        scope=scope,
+        expires_in=expires_in,
+        expires_at=expires_at
     )
 
     return {
@@ -404,6 +576,14 @@ def get_valid_token(platform: str) -> str:
                     refresh_token=new_refresh,
                     expires_at=new_expires_at,
                     scopes=token_data.get("scope", scopes)
+                )
+                export_tiktok_token_to_json(
+                    access_token=new_access,
+                    refresh_token=new_refresh,
+                    open_id=account_id,
+                    scope=token_data.get("scope", scopes),
+                    expires_in=new_expires_in,
+                    expires_at=new_expires_at
                 )
                 return new_access
             else:

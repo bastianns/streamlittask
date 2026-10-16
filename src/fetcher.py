@@ -101,7 +101,7 @@ def _fetch_tiktok_data(access_token: str) -> Dict[str, Any]:
     }
 
     # 1. Ambil info profil akun
-    user_info_url = "https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,avatar_url_100,avatar_large_url,display_name,bio_description,profile_deep_link,is_verified"
+    user_info_url = "https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,avatar_url_100,avatar_large_url,display_name,bio_description,profile_deep_link,is_verified,follower_count,following_count,likes_count,video_count"
 
     try:
         resp_user = requests.get(user_info_url, headers=headers, timeout=15)
@@ -115,12 +115,12 @@ def _fetch_tiktok_data(access_token: str) -> Dict[str, Any]:
         raise FetcherError(f"TikTok Display API Profil Error: {err_msg}")
 
     # 2. Ambil daftar video akun sendiri
-    video_list_url = "https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,duration,cover_image_url,embed_html,embed_link,like_count,comment_count,share_count,view_count"
+    video_list_url = "https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,duration,cover_image_url,embed_html,embed_link,share_url,create_time,like_count,comment_count,share_count,view_count"
     video_headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
-    video_body = {"max_count": 10}
+    video_body = {"max_count": 20}
 
     video_items: List[Dict[str, Any]] = []
     videos_error: Optional[str] = None
