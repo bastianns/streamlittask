@@ -17,6 +17,19 @@ from src.token_manager import (
 )
 from src.fetcher import fetch_data, FetcherError
 
+import importlib
+import src.cookie_manager
+importlib.reload(src.cookie_manager)
+
+from src.cookie_manager import (
+    save_tiktok_cookie_session,
+    capture_tiktok_cookies_via_browser,
+    get_tiktok_cookie_headers,
+    delete_cookie_txt_file,
+    CookieAuthError
+)
+
+
 # Gunakan ikon aplikasi di folder assets jika tersedia
 icon_path = os.path.join(BASE_DIR, "assets", "app_icon.png")
 page_icon = icon_path if os.path.exists(icon_path) else "🔐"
@@ -113,7 +126,12 @@ if "code" in params and "state" in params:
 # =========================================================================
 # 2. TAB UTAMA: INSTAGRAM & TIKTOK
 # =========================================================================
-tab_ig, tab_tt = st.tabs(["📸 Instagram (Business / Creator)", "🎵 TikTok (Login Kit v2)"])
+tab_ig, tab_tt, tab_tt_cookie = st.tabs([
+    "📸 Instagram (Business / Creator)",
+    "🎵 TikTok (Login Kit v2)",
+    "🍪 TikTok (Cookie Session)"
+])
+
 
 # -------------------------------------------------------------------------
 # TAB INSTAGRAM
@@ -321,3 +339,118 @@ with tab_tt:
                         st.write(f"❤️ {v.get('like_count', 0)} | 💬 {v.get('comment_count', 0)} | 👁️ {v.get('view_count', 0)}")
                         if v.get("embed_link"):
                             st.markdown(f"[Tonton di TikTok]({v.get('embed_link')})")
+
+# -------------------------------------------------------------------------
+# TAB TIKTOK COOKIE SESSION
+# -------------------------------------------------------------------------
+with tab_tt_cookie:
+    st.subheader("TikTok Session Cookie (Non-OAuth / Web Session)")
+    st.write(
+        "Gunakan opsi ini jika Anda memerlukan akses sesi web langsung (`sessionid`) "
+        "yang disimpan secara terenkripsi menggunakan **Fernet (AES-128)** di SQLite."
+    )
+
+    cookie_meta = storage.get_token_metadata("tiktok_cookie")
+
+    if not cookie_meta:
+        col_auto, col_manual = st.columns(2)
+
+        with col_auto:
+            st.markdown("#### 🖥️ Opsi 1: Login via Browser (Playwright)")
+            st.caption(
+                "Membuka jendela browser Chromium lokal. Silakan login seperti biasa, "
+                "dan aplikasi akan otomatis mengekstrak cookie begitu Anda masuk."
+            )
+            if st.button("🚀 Buka Browser & Ambil Cookie", type="primary", key="btn_pw_cookie"):
+                try:
+                    with st.spinner("Menunggu Anda menyelesaikan login di jendela browser yang terbuka (Maks 3 menit)..."):
+                        capture_tiktok_cookies_via_browser()
+                    st.success("🎉 Cookie session berhasil ditangkap dan dienkripsi!")
+                    st.rerun()
+                except CookieAuthError as ce:
+                    st.error(f"❌ Gagal: {str(ce)}")
+
+        with col_manual:
+            st.markdown("#### 📋 Opsi 2: Input Manual (`sessionid`)")
+            st.caption(
+                "Buka `tiktok.com` di browser -> Tekan **F12 (Application > Cookies)** -> "
+                "Salin nilai dari cookie bernama **`sessionid`**."
+            )
+            with st.form("form_manual_cookie"):
+                custom_label = st.text_input("Label / Username Akun", value="MyTikTokAccount")
+                raw_sessionid = st.text_input("Nilai Cookie `sessionid`", type="password")
+                submitted = st.form_submit_button("💾 Enkripsi & Simpan Cookie")
+
+                if submitted:
+                    try:
+                        save_tiktok_cookie_session(
+                            sessionid=raw_sessionid,
+                            username=custom_label
+                        )
+                        st.success("🎉 Cookie berhasil disimpan secara terenkripsi!")
+                        st.rerun()
+                    except CookieAuthError as ce:
+                        st.error(f"❌ {str(ce)}")
+    else:
+        # Jika cookie sudah tersimpan
+        st.markdown('<span class="badge-active">● COOKIE AKTIF (SIAP COPAS)</span>', unsafe_allow_html=True)
+        exp_time_ck = datetime.datetime.fromtimestamp(cookie_meta["expires_at"]).strftime("%Y-%m-%d %H:%M:%S")
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Label Akun", cookie_meta.get("username", "-"))
+        col2.metric("Tipe Kredensial", "Web Session Cookies")
+        col3.metric("Estimasi Kedaluwarsa", exp_time_ck)
+
+        # Ambil data cookie yang siap dicopas
+        ck_data = get_tiktok_cookie_headers()
+
+        st.divider()
+        st.markdown("### 📋 1. Nilai `sessionid` (Tinggal klik ikon Copy di kanan atas)")
+        st.code(ck_data["sessionid"], language="text")
+
+        st.markdown("### 🌐 2. Header `Cookie` Lengkap (Siap Copas untuk Postman / cURL / Scraper / Python)")
+        st.code(ck_data["cookie_str"], language="http")
+
+        with st.expander("🧩 3. Format JSON untuk Ekstensi Browser 'Cookie-Editor' (Import 1-Klik di Chrome/Edge)"):
+            import json
+            editor_json = json.dumps([
+                {
+                    "domain": ".tiktok.com",
+                    "hostOnly": False,
+                    "httpOnly": (k in ["sessionid", "sessionid_ss", "sid_guard", "sid_tt"]),
+                    "name": k,
+                    "path": "/",
+                    "sameSite": "no_restriction",
+                    "secure": True,
+                    "session": False,
+                    "value": v
+                }
+                for k, v in ck_data["cookies_dict"].items()
+            ], indent=2)
+            st.code(editor_json, language="json")
+
+        with st.expander("🖥️ 4. User-Agent Sesi Ini (Gunakan yang sama di script/Postman)"):
+            st.code(ck_data["headers"]["User-Agent"], language="text")
+
+        txt_path = ck_data.get("cookie_txt_path", "")
+        st.info("📄 Seluruh format cookie mentah ini juga tersimpan langsung di file: **`tiktok_cookie.txt`** (bisa dibuka langsung di Notepad atau VS Code).")
+
+        c_dl, c_del = st.columns([1, 1])
+        with c_dl:
+            txt_content = ""
+            if os.path.exists(txt_path):
+                with open(txt_path, "r", encoding="utf-8") as f:
+                    txt_content = f.read()
+            st.download_button(
+                "📥 Download File tiktok_cookie.txt",
+                data=txt_content,
+                file_name="tiktok_cookie.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+
+        with c_del:
+            if st.button("🗑️ Hapus Cookie Session", key="btn_del_ck", use_container_width=True):
+                storage.delete_token("tiktok_cookie")
+                delete_cookie_txt_file()
+                st.rerun()
