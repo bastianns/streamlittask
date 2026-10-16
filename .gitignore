@@ -6,4 +6,5 @@ __pycache__/
 *.pyc
 cloudflared.exe
 tiktok*.txt
-
+instagram*.txt
+*_cookie.txt
