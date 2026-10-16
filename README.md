@@ -93,7 +93,8 @@ D:\streamlit\
 │   ├── config.py               # Konfigurasi, penandatangan & verifikasi HMAC, URL builder
 │   ├── storage.py              # Skema SQLite (tokens.db) & fungsi enkripsi/dekripsi Fernet
 │   ├── token_manager.py        # Pertukaran kode OAuth & get_valid_token(platform)
-│   └── fetcher.py              # Modul pemanggilan API resmi Instagram & TikTok
+│   ├── fetcher.py              # Modul pemanggilan API resmi Instagram & TikTok
+│   └── cookie_manager.py       # Manajemen sesi cookie web TikTok (Playwright & manual)
 ├── tests/
 │   ├── __init__.py             # Inisialisasi package tests
 │   └── test_core.py            # Unit test HMAC state, enkripsi token, dan py_compile
