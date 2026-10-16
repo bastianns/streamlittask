@@ -8,11 +8,13 @@ from src import storage
 from src import token_manager
 from src import fetcher
 from src import cookie_manager
+from src import instagram_cookie_manager
 
 __all__ = [
     "config",
     "storage",
     "token_manager",
     "fetcher",
-    "cookie_manager"
+    "cookie_manager",
+    "instagram_cookie_manager"
 ]
