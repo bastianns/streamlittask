@@ -10,14 +10,6 @@ if BASE_DIR not in sys.path:
 
 import pandas as pd
 
-import importlib
-import src.storage
-importlib.reload(src.storage)
-import src.token_manager
-importlib.reload(src.token_manager)
-import src.fetcher
-importlib.reload(src.fetcher)
-
 from src import storage, config
 from src.token_manager import (
     exchange_instagram_code,
@@ -48,10 +40,6 @@ from src.fetcher import (
     FetcherError
 )
 
-import importlib
-import src.cookie_manager
-importlib.reload(src.cookie_manager)
-
 from src.cookie_manager import (
     save_tiktok_cookie_session,
     capture_tiktok_cookies_via_browser,
@@ -59,9 +47,6 @@ from src.cookie_manager import (
     delete_cookie_txt_file,
     CookieAuthError
 )
-
-import src.instagram_cookie_manager
-importlib.reload(src.instagram_cookie_manager)
 
 from src.instagram_cookie_manager import (
     save_instagram_cookie_session,

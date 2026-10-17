@@ -4,12 +4,13 @@ import requests
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
-try:
-    from src.token_manager import get_valid_token, OAuthError
-    from src.config import GRAPH_URL, FB_API_VER
-except ImportError:
-    from token_manager import get_valid_token, OAuthError
-    from config import GRAPH_URL, FB_API_VER
+import sys
+BASE_DIR_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR_ROOT not in sys.path:
+    sys.path.insert(0, BASE_DIR_ROOT)
+
+from src.token_manager import get_valid_token, OAuthError
+from src.config import GRAPH_URL, FB_API_VER
 
 
 class FetcherError(Exception):

@@ -3,10 +3,12 @@ import os
 import time
 from typing import Optional, Dict, Any
 from cryptography.fernet import Fernet
-try:
-    from src.config import TOKEN_ENCRYPTION_KEY, BASE_DIR
-except ImportError:
-    from config import TOKEN_ENCRYPTION_KEY, BASE_DIR
+import sys
+BASE_DIR_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR_ROOT not in sys.path:
+    sys.path.insert(0, BASE_DIR_ROOT)
+
+from src.config import TOKEN_ENCRYPTION_KEY, BASE_DIR
 
 DB_FILE = os.environ.get("TOKENS_DB_PATH", os.path.join(BASE_DIR, "tokens.db"))
 

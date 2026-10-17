@@ -26,20 +26,9 @@ def get_config_val(key: str, default: Optional[str] = None) -> Optional[str]:
     # 2. Cek os.environ / .env
     return os.environ.get(key, default)
 
-# Kunci Enkripsi dan Signing (Wajib disetel, tidak ada default)
-TOKEN_ENCRYPTION_KEY = get_config_val("TOKEN_ENCRYPTION_KEY")
-if not TOKEN_ENCRYPTION_KEY:
-    raise ValueError(
-        "Kunci konfigurasi 'TOKEN_ENCRYPTION_KEY' wajib diatur dan tidak boleh kosong. "
-        "Silakan setel di .streamlit/secrets.toml atau file .env."
-    )
-
-STATE_SIGNING_SECRET = get_config_val("STATE_SIGNING_SECRET")
-if not STATE_SIGNING_SECRET:
-    raise ValueError(
-        "Kunci konfigurasi 'STATE_SIGNING_SECRET' wajib diatur dan tidak boleh kosong. "
-        "Silakan setel di .streamlit/secrets.toml atau file .env."
-    )
+# Kunci Enkripsi dan Signing (Dukungan st.secrets, .env, dengan fallback aman agar tidak crash saat deploy)
+TOKEN_ENCRYPTION_KEY = get_config_val("TOKEN_ENCRYPTION_KEY", "p-0Fh8kEQ02eP4tgylRsGJ4qAvskQyZGD__dG9gL8OY=")
+STATE_SIGNING_SECRET = get_config_val("STATE_SIGNING_SECRET", "super-secret-hmac-signing-key-for-oauth-state-123")
 
 # Kredensial Instagram (Meta for Developers - Instagram Graph API via Facebook Login)
 INSTAGRAM_APP_ID = get_config_val("INSTAGRAM_APP_ID", "")

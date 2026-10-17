@@ -2,10 +2,7 @@ import os
 import time
 import json
 from typing import Dict, Any, Optional
-try:
-    from src import storage
-except ImportError:
-    import storage
+from src import storage
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IG_COOKIE_TXT_FILE = os.path.join(BASE_DIR, "instagram_cookie.txt")

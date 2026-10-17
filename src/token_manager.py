@@ -3,30 +3,22 @@ import json
 import time
 import requests
 from typing import Dict, Any, Optional
-try:
-    from src import storage
-    from src.config import (
-        INSTAGRAM_APP_ID,
-        INSTAGRAM_APP_SECRET,
-        TIKTOK_CLIENT_KEY,
-        TIKTOK_CLIENT_SECRET,
-        FB_API_VER,
-        TOKEN_URL,
-        GRAPH_URL,
-        INSTAGRAM_SCOPES,
-    )
-except ImportError:
-    import storage
-    from config import (
-        INSTAGRAM_APP_ID,
-        INSTAGRAM_APP_SECRET,
-        TIKTOK_CLIENT_KEY,
-        TIKTOK_CLIENT_SECRET,
-        FB_API_VER,
-        TOKEN_URL,
-        GRAPH_URL,
-        INSTAGRAM_SCOPES,
-    )
+import sys
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from src import storage
+from src.config import (
+    INSTAGRAM_APP_ID,
+    INSTAGRAM_APP_SECRET,
+    TIKTOK_CLIENT_KEY,
+    TIKTOK_CLIENT_SECRET,
+    FB_API_VER,
+    TOKEN_URL,
+    GRAPH_URL,
+    INSTAGRAM_SCOPES,
+)
 
 
 class OAuthError(Exception):
