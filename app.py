@@ -159,7 +159,46 @@ if "pending_oauth_code" in st.session_state:
                 st.error(f"❌ **Terjadi Kesalahan Server:** ({ex.__class__.__name__})")
 
 # =========================================================================
-# 2. TAB UTAMA: INSTAGRAM & TIKTOK
+# 2. SISTEM PENGAMAN DASHBOARD (PASSWORD / PIN GATE)
+# =========================================================================
+if not st.session_state.get("dashboard_authenticated", False):
+    st.markdown("""
+        <div style="background-color: #f1f5f9; padding: 1.5rem; border-radius: 12px; border: 1px solid #cbd5e1; margin-top: 1.5rem; margin-bottom: 1.5rem;">
+            <h3 style="margin-top: 0; color: #1e293b;">🔒 Dashboard Dilindungi Password</h3>
+            <p style="color: #475569; margin-bottom: 0;">
+                Akses ke dashboard analitik, statistik akun Instagram/TikTok, dan manajemen token memerlukan autentikasi password admin.
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    col_pw1, col_pw2, col_pw3 = st.columns([1, 2, 1])
+    with col_pw2:
+        with st.form("form_dashboard_gate"):
+            entered_pw = st.text_input("🔑 Masukkan Password Admin", type="password", placeholder="Ketik password...")
+            btn_unlock = st.form_submit_button("🔓 Buka Dashboard", type="primary", use_container_width=True)
+
+            if btn_unlock:
+                expected_pw = getattr(config, "DASHBOARD_PASSWORD", "admin123")
+                import hmac
+                if entered_pw and hmac.compare_digest(entered_pw.strip(), expected_pw.strip()):
+                    st.session_state["dashboard_authenticated"] = True
+                    st.success("✅ Password benar! Membuka dashboard...")
+                    st.rerun()
+                else:
+                    st.error("❌ Password salah. Akses ditolak!")
+
+    st.stop()
+
+# Tampilkan tombol kunci dashboard di sidebar jika sudah terbuka
+with st.sidebar:
+    st.markdown("### 🔐 Status Sesi")
+    st.markdown('<span class="badge-active">● DASHBOARD TERBUKA</span>', unsafe_allow_html=True)
+    if st.button("🔒 Kunci Dashboard / Logout", use_container_width=True):
+        st.session_state["dashboard_authenticated"] = False
+        st.rerun()
+
+# =========================================================================
+# 3. TAB UTAMA: INSTAGRAM & TIKTOK
 # =========================================================================
 tab_ig, tab_ig_cookie, tab_tt, tab_tt_cookie = st.tabs([
     "📸 Instagram (Business / Creator)",

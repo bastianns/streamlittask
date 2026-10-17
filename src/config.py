@@ -53,6 +53,9 @@ TIKTOK_CLIENT_KEY = get_config_val("TIKTOK_CLIENT_KEY", "")
 TIKTOK_CLIENT_SECRET = get_config_val("TIKTOK_CLIENT_SECRET", "")
 TIKTOK_REDIRECT_URI = get_config_val("TIKTOK_REDIRECT_URI", "https://bastian-tiktok-app.streamlit.app/")
 
+# Password Kunci Keamanan Dashboard
+DASHBOARD_PASSWORD = get_config_val("DASHBOARD_PASSWORD", "admin123")
+
 
 def generate_signed_state(platform: str, secret_key: Optional[str] = None) -> str:
     """
