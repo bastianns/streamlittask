@@ -31,8 +31,8 @@ TOKEN_ENCRYPTION_KEY = get_config_val("TOKEN_ENCRYPTION_KEY", "p-0Fh8kEQ02eP4tgy
 STATE_SIGNING_SECRET = get_config_val("STATE_SIGNING_SECRET", "super-secret-hmac-signing-key-for-oauth-state-123")
 
 # Kredensial Instagram (Meta for Developers - Instagram Graph API via Facebook Login)
-INSTAGRAM_APP_ID = get_config_val("INSTAGRAM_APP_ID", "")
-INSTAGRAM_APP_SECRET = get_config_val("INSTAGRAM_APP_SECRET", "")
+INSTAGRAM_APP_ID = get_config_val("INSTAGRAM_APP_ID", "840635075493798")
+INSTAGRAM_APP_SECRET = get_config_val("INSTAGRAM_APP_SECRET", "7df9ca7fffad0090a66d8b7650983076")
 INSTAGRAM_REDIRECT_URI = get_config_val("INSTAGRAM_REDIRECT_URI", "https://bastian-tiktok-app.streamlit.app/")
 
 FB_API_VER = get_config_val("FB_API_VERSION", "v21.0")
@@ -49,8 +49,8 @@ INSTAGRAM_SCOPES = ",".join([
 ])
 
 # Kredensial TikTok (TikTok for Developers - Login Kit v2)
-TIKTOK_CLIENT_KEY = get_config_val("TIKTOK_CLIENT_KEY", "")
-TIKTOK_CLIENT_SECRET = get_config_val("TIKTOK_CLIENT_SECRET", "")
+TIKTOK_CLIENT_KEY = get_config_val("TIKTOK_CLIENT_KEY", "sbaw5f16m7rispfq1u")
+TIKTOK_CLIENT_SECRET = get_config_val("TIKTOK_CLIENT_SECRET", "1cwhiLnwrdrsiZJefXgARUWXOAU7Wjcq")
 TIKTOK_REDIRECT_URI = get_config_val("TIKTOK_REDIRECT_URI", "https://bastian-tiktok-app.streamlit.app/")
 
 # Password Kunci Keamanan Dashboard
