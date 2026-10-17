@@ -42,8 +42,8 @@ if not STATE_SIGNING_SECRET:
     )
 
 # Kredensial Instagram (Meta for Developers - Instagram Graph API via Facebook Login)
-INSTAGRAM_APP_ID = get_config_val("INSTAGRAM_APP_ID", "840635075493798")
-INSTAGRAM_APP_SECRET = get_config_val("INSTAGRAM_APP_SECRET", "7df9ca7fffad0090a66d8b7650983076")
+INSTAGRAM_APP_ID = get_config_val("INSTAGRAM_APP_ID", "")
+INSTAGRAM_APP_SECRET = get_config_val("INSTAGRAM_APP_SECRET", "")
 INSTAGRAM_REDIRECT_URI = get_config_val("INSTAGRAM_REDIRECT_URI", "https://bastian-tiktok-app.streamlit.app/")
 
 FB_API_VER = get_config_val("FB_API_VERSION", "v21.0")
