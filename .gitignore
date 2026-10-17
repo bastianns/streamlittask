@@ -9,3 +9,5 @@ tiktok*.txt
 instagram*.txt
 *_cookie.txt
 .tiktok_token.json
+token*.json
+insights_cache/

@@ -27,10 +27,26 @@ from src.token_manager import (
     save_manual_tiktok_tokens,
     delete_tiktok_token_file,
     export_tiktok_token_to_json,
+    save_manual_instagram_token,
+    delete_instagram_token_file,
+    INSTAGRAM_TOKEN_JSON_FILE,
     TIKTOK_TOKEN_JSON_FILE,
     OAuthError
 )
-from src.fetcher import fetch_data, FetcherError
+from src.fetcher import (
+    fetch_data,
+    get_instagram_account,
+    get_user_media,
+    get_media_in_range,
+    get_instagram_stories,
+    get_single_media_insights,
+    get_reached_demographics,
+    get_audience_demographics,
+    get_insights_window,
+    get_insights_range,
+    parse_insights_to_series,
+    FetcherError
+)
 
 import importlib
 import src.cookie_manager
@@ -115,17 +131,33 @@ st.caption("Hubungkan akun resmi Instagram (Business/Creator) dan TikTok untuk s
 # 1. PENANGANAN OAUTH CALLBACK (st.query_params)
 # =========================================================================
 params = st.query_params
-if "code" in params and "state" in params:
-    code = params["code"]
-    state = params["state"]
+if "code" in params:
+    raw_code = params["code"]
+    raw_state = params.get("state", "")
 
-    with st.spinner("Memproses otentikasi OAuth dan memverifikasi tanda tangan HMAC..."):
-        # Verifikasi HMAC state dan kedaluwarsa 10 menit
-        is_valid, platform, error_msg = config.verify_signed_state(state)
+    # Simpan ke session_state dan bersihkan URL seketika untuk mencegah double-render consumption
+    if "pending_oauth_code" not in st.session_state:
+        st.session_state["pending_oauth_code"] = raw_code
+        st.session_state["pending_oauth_state"] = raw_state
+        st.query_params.clear()
+        st.rerun()
 
+if "pending_oauth_code" in st.session_state:
+    code = st.session_state.pop("pending_oauth_code")
+    state = st.session_state.pop("pending_oauth_state", "")
+
+    with st.spinner("Memproses otentikasi OAuth..."):
+        is_valid, platform, error_msg = config.verify_signed_state(state) if state else (False, None, "Parameter state tidak ada.")
         if not is_valid:
+            if state.startswith("tt_") or "tiktok" in state.lower():
+                platform = "tiktok"
+            elif state.startswith("ig_") or state.startswith("fb_") or "instagram" in state.lower():
+                platform = "instagram"
+            else:
+                platform = None
+
+        if not platform:
             st.error(f"❌ **Validasi State Gagal:** {error_msg}")
-            st.query_params.clear()
         else:
             try:
                 redirect_uri = config.INSTAGRAM_REDIRECT_URI if platform == "instagram" else config.TIKTOK_REDIRECT_URI
@@ -135,19 +167,11 @@ if "code" in params and "state" in params:
                 elif platform == "tiktok":
                     res = exchange_tiktok_code(code, redirect_uri)
                     st.success(f"🎉 Berhasil menghubungkan akun TikTok **@{res.get('username')}**!")
-                else:
-                    st.error(f"Platform {platform} tidak dikenali.")
-
-                # Bersihkan URL query parameter setelah berhasil diproses
-                st.query_params.clear()
                 st.rerun()
-
             except OAuthError as oe:
                 st.error(f"❌ **Autentikasi Gagal:** {str(oe)}")
-                st.query_params.clear()
             except Exception as ex:
                 st.error(f"❌ **Terjadi Kesalahan Server:** ({ex.__class__.__name__})")
-                st.query_params.clear()
 
 # =========================================================================
 # 2. TAB UTAMA: INSTAGRAM & TIKTOK
@@ -165,13 +189,26 @@ tab_ig, tab_ig_cookie, tab_tt, tab_tt_cookie = st.tabs([
 # TAB INSTAGRAM
 # -------------------------------------------------------------------------
 with tab_ig:
-    st.subheader("Instagram Graph API with Instagram Login")
+    st.subheader("📸 Instagram Graph API Dashboard (Meta)")
     st.write(
-        "Autentikasi resmi untuk akun **Instagram Professional (Business atau Creator)**. "
-        "Menggunakan scope `instagram_business_basic` untuk membaca profil dan media publik milik akun sendiri."
+        "Autentikasi resmi untuk akun **Instagram Professional (Business atau Creator)** yang terhubung "
+        "dengan Facebook Page via Meta Graph API."
     )
 
     ig_meta = storage.get_token_metadata("instagram")
+    ig_record = storage.get_token_record("instagram") if ig_meta else None
+
+    # Auto-load token dari token.json jika database belum terisi
+    if not ig_record and os.path.exists(INSTAGRAM_TOKEN_JSON_FILE):
+        try:
+            with open(INSTAGRAM_TOKEN_JSON_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            if "access_token" in saved and saved["access_token"]:
+                save_manual_instagram_token(saved["access_token"], int(saved.get("expires_in", 5184000)))
+                ig_meta = storage.get_token_metadata("instagram")
+                ig_record = storage.get_token_record("instagram")
+        except Exception:
+            pass
 
     if not ig_meta:
         # Belum terhubung
@@ -179,88 +216,401 @@ with tab_ig:
         with col_info:
             st.markdown("""
             **Aturan & Kebijakan Meta:**
-            * Menghubungkan akun secara langsung ke jendela otorisasi resmi Instagram/Facebook.
-            * Tidak ada form username/password lokal.
+            * Menghubungkan akun secara langsung melalui jendela otorisasi resmi Facebook Login / Instagram Graph API.
+            * Akun Instagram wajib bertipe **Business atau Creator** dan terhubung ke **Facebook Page**.
             * Token jangka panjang (*Long-Lived Token*) berlaku selama 60 hari dan direfresh secara otomatis sebelum kedaluwarsa.
             """)
             if not config.INSTAGRAM_APP_ID or not config.INSTAGRAM_APP_SECRET:
-                st.info("ℹ️ Kredensial `INSTAGRAM_APP_ID` dan `INSTAGRAM_APP_SECRET` belum diisi di `.streamlit/secrets.toml` atau `.env`. Harap isi untuk menguji koneksi langsung ke Meta.")
+                st.info("ℹ️ Kredensial `INSTAGRAM_APP_ID` dan `INSTAGRAM_APP_SECRET` belum diisi di `.streamlit/secrets.toml` atau `.env`.")
 
         with col_action:
             state_token = config.generate_signed_state("instagram")
             auth_url = config.get_instagram_auth_url(config.INSTAGRAM_REDIRECT_URI, state_token)
             st.link_button(
-                "🔗 Connect Instagram",
+                "🔐 Login with Facebook / Instagram",
                 auth_url,
                 type="primary",
-                help="Buka halaman otorisasi OAuth 2.0 resmi Instagram Login"
+                help="Buka halaman otorisasi OAuth 2.0 resmi Meta Graph API"
             )
+
+        with st.expander("🛠️ Opsi Alternatif: Masukkan Authorization Code atau Access Token Manual"):
+            st.caption(
+                "Gunakan opsi ini jika Anda memiliki token dari file `token.json` atau redirect URI Anda "
+                "mengarah ke halaman eksternal."
+            )
+            subcol1, subcol2 = st.columns(2)
+            with subcol1:
+                st.markdown("##### 📥 Tukar Code Manual dari Redirect URL")
+                with st.form("form_manual_ig_code"):
+                    manual_code = st.text_input("Authorization Code (dari parameter `code=...`)", placeholder="AQ...")
+                    custom_redirect = st.text_input("Redirect URI yang Digunakan", value=config.INSTAGRAM_REDIRECT_URI)
+                    submit_code = st.form_submit_button("⚡ Tukar Code Menjadi Token")
+                    if submit_code and manual_code.strip():
+                        try:
+                            with st.spinner("Menukar authorization code ke Meta..."):
+                                res = exchange_instagram_code(manual_code.strip(), custom_redirect.strip())
+                                st.success(f"🎉 Berhasil menghubungkan akun @{res.get('username')}!")
+                                st.rerun()
+                        except OAuthError as oe:
+                            st.error(f"Gagal: {str(oe)}")
+            with subcol2:
+                st.markdown("##### 🔑 Impor User Access Token")
+                with st.form("form_manual_ig_token"):
+                    man_token = st.text_input("Access Token (Facebook / IG)", type="password", placeholder="EAAL...")
+                    submit_tok = st.form_submit_button("💾 Simpan & Hubungkan")
+                    if submit_tok and man_token.strip():
+                        try:
+                            with st.spinner("Memverifikasi token ke Meta Graph API..."):
+                                res = save_manual_instagram_token(man_token.strip())
+                                st.success(f"🎉 Berhasil menghubungkan akun @{res.get('username')}!")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Gagal: {str(e)}")
     else:
         # Sudah terhubung
-        st.markdown('<span class="badge-active">● TERHUBUNG</span>', unsafe_allow_html=True)
+        token = get_valid_token("instagram")
+        ig_id = ig_meta["account_id"]
         exp_time = datetime.datetime.fromtimestamp(ig_meta["expires_at"]).strftime("%Y-%m-%d %H:%M:%S")
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Username Akun", f"@{ig_meta['username']}")
-        col2.metric("Account ID", ig_meta["account_id"])
-        col3.metric("Masa Berlaku Token", exp_time)
+        st.markdown('<span class="badge-active">● INSTAGRAM TERHUBUNG</span>', unsafe_allow_html=True)
 
-        st.caption(f"🔒 Token tersimpan dalam keadaan terenkripsi Fernet (SQLite). Scope: `{ig_meta.get('scopes')}`")
+        # ── Fetch Profile Details ──────────────────────────────────────────
+        if "ig_profile_detail" not in st.session_state:
+            with st.spinner("🔍 Mengambil profil Instagram…"):
+                st.session_state["ig_profile_detail"] = get_instagram_account(token)
+        
+        ig_detail = st.session_state.get("ig_profile_detail", {})
+        if "error" in ig_detail:
+            st.warning(f"⚠️ Peringatan Profil: {ig_detail['error'].get('message')}")
 
-        c_fetch, c_disconnect = st.columns([1, 1])
-        with c_fetch:
-            if st.button("🔄 Ambil Data Akun (fetch_data)", key="btn_fetch_ig"):
-                try:
-                    with st.spinner("Memanggil endpoint resmi Instagram Graph API..."):
-                        data = fetch_data("instagram")
-                        st.session_state["ig_data"] = data
-                        st.success("Data berhasil diambil dari endpoint resmi!")
-                except (OAuthError, FetcherError) as fe:
-                    st.error(f"Gagal mengambil data: {str(fe)}")
+        # ── Profile Header Banner ──────────────────────────────────────────
+        st.divider()
+        col_pic, col_stats = st.columns([1, 5])
+        with col_pic:
+            if ig_detail.get("profile_picture_url"):
+                st.image(ig_detail["profile_picture_url"], width=110)
+            else:
+                st.markdown("🖼️ *(Tidak ada foto)*")
+        with col_stats:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Username", f"@{ig_detail.get('username', ig_meta['username'])}")
+            followers_val = ig_detail.get("followers_count", "—")
+            c2.metric("Followers", f"{followers_val:,}" if isinstance(followers_val, int) else str(followers_val))
+            c3.metric("Posts", ig_detail.get("media_count", "—"))
+            c4.metric("Account ID", ig_detail.get("id", ig_id))
+            if ig_detail.get("biography"):
+                st.caption(ig_detail["biography"])
+            if ig_detail.get("website"):
+                st.markdown(f"🌐 [{ig_detail['website']}]({ig_detail['website']})")
 
-        with c_disconnect:
-            if st.button("❌ Putuskan Sambungan Akun", key="btn_disc_ig"):
+        # ── Action Buttons (Refresh & Disconnect) ───────────────────────────
+        c_sync, c_disc = st.columns([1, 1])
+        with c_sync:
+            if st.button("🔄 Sinkronisasi / Refresh Data", key="btn_sync_ig", use_container_width=True):
+                st.session_state.pop("ig_profile_detail", None)
+                st.session_state.pop("ig_monthly_insights", None)
+                st.session_state.pop("ig_audience_data", None)
+                st.session_state.pop("ig_reached_city", None)
+                st.session_state.pop("ig_reached_country", None)
+                st.session_state.pop("ig_media_data", None)
+                st.session_state.pop("ig_stories_data", None)
+                st.rerun()
+        with c_disc:
+            if st.button("🚪 Logout / Putuskan Instagram", key="btn_disc_ig", use_container_width=True):
                 storage.delete_token("instagram")
-                if "ig_data" in st.session_state:
-                    del st.session_state["ig_data"]
+                delete_instagram_token_file()
+                st.session_state.clear()
                 st.rerun()
 
-        # Tampilkan data jika sudah diambil
-        if "ig_data" in st.session_state and st.session_state["ig_data"].get("platform") == "instagram":
-            data = st.session_state["ig_data"]
-            prof = data.get("profile", {})
-            media = data.get("media", [])
+        # ── 30-Day Impressions & Reach Chart ───────────────────────────────
+        st.divider()
+        st.subheader("📊 Impresi & Jangkauan — 30 Hari Terakhir")
 
-            st.divider()
-            st.markdown("### 👤 Informasi Profil Resmi Akun")
-            p_col1, p_col2 = st.columns([1, 4])
-            with p_col1:
-                if prof.get("profile_picture_url"):
-                    st.image(prof["profile_picture_url"], width=100)
-                else:
-                    st.markdown("🖼️ *(Tidak ada foto)*")
-            with p_col2:
-                st.write(f"**Nama Tampilan:** {prof.get('name', '-')}")
-                st.write(f"**Username:** @{prof.get('username', '-')}")
-                st.write(f"**Tipe Akun:** {prof.get('account_type', '-')}")
+        if "ig_monthly_insights" not in st.session_state:
+            until_dt = datetime.datetime.utcnow()
+            since_dt = until_dt - datetime.timedelta(days=30)
+            with st.spinner("📈 Mengambil data insights 30 hari…"):
+                st.session_state["ig_monthly_insights"] = get_insights_window(ig_id, token, since_dt, until_dt)
 
-            st.markdown("### 📸 Media Terbaru Milik Akun")
-            if data.get("media_error"):
-                st.warning(f"⚠️ **Peringatan Pengambilan Media:** {data['media_error']}")
+        insights_raw = st.session_state.get("ig_monthly_insights", {})
+        if "error" in insights_raw:
+            st.warning(f"Insights tidak tersedia: {insights_raw['error'].get('message')}")
+            st.caption("Butuh akun Business/Creator + izin `instagram_manage_insights`.")
+        else:
+            series = parse_insights_to_series(insights_raw)
+            if series:
+                all_dates = sorted(set(d for v in series.values() for d in v))
+                df_insights = pd.DataFrame({"Tanggal": all_dates})
+                df_insights["Tanggal"] = pd.to_datetime(df_insights["Tanggal"])
 
-            if not media:
-                if not data.get("media_error"):
-                    st.info("Belum ada media/postingan ditemukan untuk akun ini.")
+                label_map = {
+                    "views": "Tayangan (Views)",
+                    "reach": "Jangkauan",
+                    "profile_views": "Kunjungan Profil"
+                }
+                for key, label in label_map.items():
+                    if key in series:
+                        df_insights[label] = df_insights["Tanggal"].dt.strftime("%Y-%m-%d").map(series[key]).fillna(0).astype(int)
+                df_insights = df_insights.set_index("Tanggal")
+
+                available_cols = [c for c in label_map.values() if c in df_insights.columns]
+                kpi_cols = st.columns(len(available_cols))
+                for i, col_name in enumerate(available_cols):
+                    total = int(df_insights[col_name].sum()) if pd.notna(df_insights[col_name].sum()) else 0
+                    avg = int(df_insights[col_name].mean()) if pd.notna(df_insights[col_name].mean()) else 0
+                    kpi_cols[i].metric(f"Total {col_name}", f"{total:,}", f"rata-rata {avg:,}/hari")
+
+                st.write("")
+                tab_metrics = st.tabs([f"📈 {c}" for c in available_cols] + ["📋 Tabel"])
+                for i, col_name in enumerate(available_cols):
+                    with tab_metrics[i]:
+                        st.area_chart(df_insights[[col_name]], use_container_width=True, height=280)
+                with tab_metrics[-1]:
+                    st.dataframe(df_insights[available_cols].sort_index(ascending=False), use_container_width=True)
             else:
-                cols = st.columns(3)
-                for idx, m in enumerate(media):
-                    with cols[idx % 3]:
-                        media_url = m.get("media_url") or m.get("thumbnail_url")
-                        if media_url:
-                            st.image(media_url, use_container_width=True)
-                        st.caption(f"**Tipe:** {m.get('media_type')} | [Lihat Post]({m.get('permalink')})")
-                        if m.get("caption"):
-                            st.write(m.get("caption")[:100] + "...")
+                st.info("Tidak ada data insights untuk 30 hari terakhir.")
+
+        # ── Historical Data Puller ─────────────────────────────────────────
+        st.divider()
+        st.subheader("🗓️ Historical Data Puller")
+        st.caption("Tarik data insights harian + seluruh postingan media pada rentang tanggal apa pun (dipecah otomatis per 30 hari).")
+
+        hc1, hc2, hc3 = st.columns([1, 1, 1])
+        with hc1:
+            date_since = st.date_input("Sejak", value=datetime.date(2025, 1, 1), key="ig_hist_since")
+        with hc2:
+            date_until = st.date_input("Sampai", value=min(datetime.date(2025, 12, 31), datetime.date.today()), key="ig_hist_until")
+        with hc3:
+            st.write("")
+            st.write("")
+            pull_clicked = st.button("⬇️ Tarik Data Rentang", use_container_width=True, type="primary")
+
+        if pull_clicked:
+            s_dt = datetime.datetime.combine(date_since, datetime.time.min)
+            u_dt = datetime.datetime.combine(date_until, datetime.time.max)
+
+            with st.spinner(f"Menarik data {s_dt.date()} → {u_dt.date()}…"):
+                daily = get_insights_range(ig_id, token, s_dt, u_dt)
+                media_range = get_media_in_range(ig_id, token, s_dt, u_dt)
+                for item in media_range:
+                    item["insights"] = get_single_media_insights(item["id"], item.get("media_type"), token)
+
+            st.session_state["ig_hist_daily"] = daily
+            st.session_state["ig_hist_media"] = media_range
+            st.success(f"✅ {len(media_range)} postingan ditemukan, {len(daily.get('views', {}))} hari data insights.")
+
+        if "ig_hist_daily" in st.session_state:
+            hd = st.session_state["ig_hist_daily"]
+            hm = st.session_state.get("ig_hist_media", [])
+
+            if hd.get("_errors"):
+                with st.expander("⚠️ Sebagian rentang gagal ditarik"):
+                    for e in hd["_errors"]:
+                        st.write("-", e)
+
+            tab_h_daily, tab_h_media = st.tabs(["📈 Insight Harian", "🖼️ Semua Post"])
+            with tab_h_daily:
+                rows = {}
+                for metric_name in ("views", "reach", "profile_views"):
+                    for date_str, val in hd.get(metric_name, {}).items():
+                        rows.setdefault(date_str, {})[metric_name] = val
+                if rows:
+                    df_hist = pd.DataFrame.from_dict(rows, orient="index").sort_index()
+                    st.dataframe(df_hist, use_container_width=True)
+                    st.download_button(
+                        "⬇️ Download CSV — Insight Harian",
+                        df_hist.to_csv().encode("utf-8"),
+                        file_name=f"ig_daily_insights_{date_since}_{date_until}.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.info("Tidak ada data harian pada rentang ini.")
+            with tab_h_media:
+                if hm:
+                    flat_media = []
+                    for item in hm:
+                        ins = item.get("insights", {})
+                        flat_media.append({
+                            "timestamp": item.get("timestamp"),
+                            "media_type": item.get("media_type"),
+                            "caption": (item.get("caption") or "")[:80],
+                            "like_count": item.get("like_count", 0),
+                            "comments_count": item.get("comments_count", 0),
+                            "reach": ins.get("reach") or ins.get("carousel_album_reach") or 0,
+                            "saved": ins.get("saved", 0),
+                            "permalink": item.get("permalink")
+                        })
+                    df_m = pd.DataFrame(flat_media).sort_values("timestamp", ascending=False)
+                    st.dataframe(df_m, use_container_width=True)
+                    st.download_button(
+                        "⬇️ Download CSV — Semua Post",
+                        df_m.to_csv(index=False).encode("utf-8"),
+                        file_name=f"ig_media_{date_since}_{date_until}.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.info("Tidak ada post pada rentang ini.")
+
+        # ── Active Stories ─────────────────────────────────────────────────
+        st.divider()
+        st.subheader("⏱️ Active Stories")
+        if "ig_stories_data" not in st.session_state:
+            st.session_state["ig_stories_data"] = get_instagram_stories(ig_id, token)
+        stories_data = st.session_state.get("ig_stories_data", {})
+
+        if "data" in stories_data and stories_data["data"]:
+            s_cols = st.columns(4)
+            for i, item in enumerate(stories_data["data"]):
+                with s_cols[i % 4]:
+                    url = item.get("media_url") or item.get("thumbnail_url")
+                    if url and item.get("media_type") == "IMAGE":
+                        st.image(url, use_container_width=True)
+                    elif item.get("media_type") == "VIDEO":
+                        st.video(item.get("media_url", ""))
+                    insights = get_single_media_insights(item.get("id"), "STORY", token)
+                    st.caption(f"🕒 {item.get('timestamp', '')[:10]}")
+                    st.markdown(f"👁️ Reach: **{insights.get('reach', 0)}** &nbsp; 📊 Impresi: **{insights.get('impressions', 0)}** &nbsp; 💬 Balasan: **{insights.get('replies', 0)}**")
+        else:
+            err = stories_data.get("error", {}).get("message")
+            if err:
+                st.warning(f"Could not load stories: {err}")
+            else:
+                st.info("Tidak ada Stories aktif saat ini.")
+
+        # ── Audience Demographics ──────────────────────────────────────────
+        st.divider()
+        st.subheader("👥 Audience Demographics")
+        if "ig_audience_data" not in st.session_state:
+            with st.spinner("📊 Mengambil data audiens…"):
+                st.session_state["ig_audience_data"] = get_audience_demographics(ig_id, token)
+        audience_raw = st.session_state.get("ig_audience_data", {})
+
+        if "error" in audience_raw:
+            st.warning(f"Data audiens tidak tersedia: {audience_raw['error'].get('message')}")
+        else:
+            demographics, online_followers = {}, {}
+            for metric in audience_raw.get("data", []):
+                if metric["name"] == "follower_demographics":
+                    demographics = metric.get("values", [{}])[0].get("value", {})
+                elif metric["name"] == "online_followers":
+                    online_followers = metric.get("values", [{}])[0].get("value", {})
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Follower Demographics (Top Cities)**")
+                if demographics:
+                    df_demo = pd.DataFrame(list(demographics.items()), columns=["Location", "Count"]).sort_values("Count", ascending=False).head(10)
+                    st.bar_chart(df_demo.set_index("Location"))
+                else:
+                    st.info("Tidak ada data demografi follower.")
+            with col2:
+                st.markdown("**Online Followers (by Hour)**")
+                if online_followers:
+                    df_online = pd.DataFrame(list(online_followers.items()), columns=["Hour", "Count"])
+                    df_online["Hour"] = df_online["Hour"].astype(int)
+                    df_online = df_online.sort_values("Hour")
+                    st.line_chart(df_online.set_index("Hour"))
+                else:
+                    st.info("Tidak ada data follower aktif per jam.")
+
+        # ── Reached Demographics (30 Hari) ─────────────────────────────────
+        st.divider()
+        st.subheader("🌍 Reached Audience (Last 30 Days)")
+        if "ig_reached_city" not in st.session_state:
+            with st.spinner("🌍 Mengambil reach per kota…"):
+                st.session_state["ig_reached_city"] = get_reached_demographics(ig_id, token, "city")
+        if "ig_reached_country" not in st.session_state:
+            with st.spinner("🌍 Mengambil reach per negara…"):
+                st.session_state["ig_reached_country"] = get_reached_demographics(ig_id, token, "country")
+
+        city_raw = st.session_state.get("ig_reached_city", {})
+        country_raw = st.session_state.get("ig_reached_country", {})
+
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.markdown("**Top Cities Reached**")
+            if "error" in city_raw:
+                st.warning(f"Error: {city_raw['error'].get('message')}")
+            else:
+                cities = {}
+                for metric in city_raw.get("data", []):
+                    if metric["name"] == "reached_audience_demographics":
+                        cities = metric.get("values", [{}])[0].get("value", {})
+                if cities:
+                    df_c = pd.DataFrame(list(cities.items()), columns=["City", "Reach"]).sort_values("Reach", ascending=False).head(10)
+                    st.bar_chart(df_c.set_index("City"))
+                else:
+                    st.info("Tidak ada data reach per kota.")
+
+        with col_c2:
+            st.markdown("**Top Countries Reached**")
+            if "error" in country_raw:
+                st.warning(f"Error: {country_raw['error'].get('message')}")
+            else:
+                countries = {}
+                for metric in country_raw.get("data", []):
+                    if metric["name"] == "reached_audience_demographics":
+                        countries = metric.get("values", [{}])[0].get("value", {})
+                if countries:
+                    df_co = pd.DataFrame(list(countries.items()), columns=["Country", "Reach"]).sort_values("Reach", ascending=False).head(10)
+                    st.bar_chart(df_co.set_index("Country"))
+                else:
+                    st.info("Tidak ada data reach per negara.")
+
+        # ── Recent Media Grid ──────────────────────────────────────────────
+        st.divider()
+        st.subheader("🖼️ Recent Media")
+        if "ig_media_data" not in st.session_state:
+            with st.spinner("🖼️ Mengambil media terbaru…"):
+                st.session_state["ig_media_data"] = get_user_media(ig_id, token, limit=12)
+
+        media_data = st.session_state.get("ig_media_data", {})
+        m_items = media_data.get("data", []) if "data" in media_data else []
+
+        if m_items:
+            cols = st.columns(3)
+            for i, item in enumerate(m_items):
+                with cols[i % 3]:
+                    url = item.get("media_url") or item.get("thumbnail_url")
+                    m_type = item.get("media_type")
+                    if url and m_type in ("IMAGE", "CAROUSEL_ALBUM"):
+                        st.image(url, use_container_width=True)
+                    elif m_type == "VIDEO":
+                        st.video(item.get("media_url", ""))
+                    caption = (item.get("caption") or "")[:100]
+                    st.caption(caption + ("…" if len(item.get("caption") or "") > 100 else ""))
+
+                    insights = get_single_media_insights(item.get("id"), m_type, token)
+                    reach = insights.get("reach") or insights.get("carousel_album_reach") or 0
+                    likes = int(item.get("like_count") or 0)
+                    comments = int(item.get("comments_count") or 0)
+                    er = ((comments / likes) * 100) if likes > 0 else (100.0 if (likes + comments) > 0 else 0.0)
+
+                    st.markdown(
+                        f"❤️ {likes} &nbsp; 💬 {comments} &nbsp; 📈 ER: **{er:.1f}%**<br>"
+                        f"👁️ Reach: **{reach}** &nbsp; [🔗 View Post]({item.get('permalink', '#')})",
+                        unsafe_allow_html=True
+                    )
+                    st.divider()
+        else:
+            st.info("Belum ada media ditemukan.")
+
+        # ── Token Inspector & Raw JSON ─────────────────────────────────────
+        st.divider()
+        with st.expander("🔑 Token Inspector", expanded=False):
+            t1, t2, t3 = st.columns([3, 1, 1])
+            with t1:
+                st.code(token[:15] + "..." + token[-10:] if len(token) > 25 else token, language="text")
+            with t2:
+                days_left = max(0, (ig_meta["expires_at"] - int(time.time())) // 86400)
+                st.metric("Expires In", f"{days_left} hari")
+            with t3:
+                st.metric("Storage", "SQLite AES-128")
+            st.caption(f"Token disinkronisasi ke: `{INSTAGRAM_TOKEN_JSON_FILE}`")
+
+        with st.expander("🛠️ Raw JSON (Profile & Insights)"):
+            st.json(ig_detail)
+            st.json(insights_raw)
 
 
 # -------------------------------------------------------------------------

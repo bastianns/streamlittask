@@ -10,6 +10,10 @@ try:
         INSTAGRAM_APP_SECRET,
         TIKTOK_CLIENT_KEY,
         TIKTOK_CLIENT_SECRET,
+        FB_API_VER,
+        TOKEN_URL,
+        GRAPH_URL,
+        INSTAGRAM_SCOPES,
     )
 except ImportError:
     import storage
@@ -18,6 +22,10 @@ except ImportError:
         INSTAGRAM_APP_SECRET,
         TIKTOK_CLIENT_KEY,
         TIKTOK_CLIENT_SECRET,
+        FB_API_VER,
+        TOKEN_URL,
+        GRAPH_URL,
+        INSTAGRAM_SCOPES,
     )
 
 
@@ -98,117 +106,165 @@ def _extract_tiktok_error(res_json: Any) -> str:
     return f"Respon TikTok tidak dikenali (kunci: {', '.join(list(res_json.keys())[:8])})"
 
 
+INSTAGRAM_TOKEN_JSON_FILE = os.path.join(storage.BASE_DIR, "token.json")
+
+
+def export_instagram_token_to_json(
+    access_token: str,
+    expires_in: int = 5184000,
+    token_type: str = "bearer"
+) -> str:
+    """Menyimpan token Instagram ke token.json (format kompatibel dengan Archive)."""
+    data = {
+        "access_token": access_token,
+        "expires_in": expires_in,
+        "token_type": token_type
+    }
+    try:
+        with open(INSTAGRAM_TOKEN_JSON_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+    return INSTAGRAM_TOKEN_JSON_FILE
+
+
+def delete_instagram_token_file() -> None:
+    """Menghapus file token.json saat disconnect."""
+    if os.path.exists(INSTAGRAM_TOKEN_JSON_FILE):
+        try:
+            os.remove(INSTAGRAM_TOKEN_JSON_FILE)
+        except Exception:
+            pass
+
+
+def save_manual_instagram_token(
+    access_token: str,
+    expires_in: int = 5184000,
+    token_type: str = "bearer"
+) -> Dict[str, Any]:
+    """
+    Menyimpan token Instagram yang diinput secara manual atau dari file token.json.
+    Secara otomatis mengambil detail Instagram Business Account via Facebook Graph API.
+    """
+    clean_token = access_token.strip()
+    if not clean_token:
+        raise OAuthError("Token Instagram tidak boleh kosong.")
+
+    ig_id = None
+    username = "Instagram Business"
+    try:
+        pages_resp = requests.get(
+            f"{GRAPH_URL}/me/accounts",
+            params={"access_token": clean_token, "fields": "id,name,instagram_business_account"},
+            timeout=15
+        )
+        if pages_resp.status_code == 200:
+            pages = pages_resp.json().get("data", [])
+            for page in pages:
+                ig_info = page.get("instagram_business_account")
+                if ig_info:
+                    ig_id = str(ig_info["id"])
+                    detail_resp = requests.get(
+                        f"{GRAPH_URL}/{ig_id}",
+                        params={
+                            "fields": "id,username,name,biography,followers_count,follows_count,media_count,profile_picture_url,website",
+                            "access_token": clean_token
+                        },
+                        timeout=15
+                    )
+                    if detail_resp.status_code == 200:
+                        detail = detail_resp.json()
+                        username = detail.get("username", username)
+                    break
+    except Exception:
+        pass
+
+    if not ig_id:
+        try:
+            me_resp = requests.get(f"{GRAPH_URL}/me", params={"access_token": clean_token, "fields": "id,name"}, timeout=10)
+            if me_resp.status_code == 200:
+                me_data = me_resp.json()
+                ig_id = str(me_data.get("id", "instagram_user"))
+                username = me_data.get("name", "Instagram Account")
+        except Exception:
+            ig_id = "instagram_user"
+
+    expires_at = int(time.time()) + expires_in
+    storage.save_token(
+        platform="instagram",
+        account_id=ig_id,
+        username=username,
+        access_token=clean_token,
+        refresh_token=None,
+        expires_at=expires_at,
+        scopes=INSTAGRAM_SCOPES
+    )
+    export_instagram_token_to_json(clean_token, expires_in, token_type)
+    return {
+        "platform": "instagram",
+        "account_id": ig_id,
+        "username": username,
+        "expires_at": expires_at
+    }
+
+
 def exchange_instagram_code(code: str, redirect_uri: str) -> Dict[str, Any]:
     """
-    Menukar Authorization Code dengan Long-Lived User Access Token untuk Instagram.
-    Alur resmi Meta:
-    1. Code -> Short-Lived Access Token (1 jam) via api.instagram.com
-       Mendukung dua format respons token pendek:
-       - Datar: {"access_token": "...", "user_id": ...}
-       - Terbungkus: {"data": [{"access_token": "...", "user_id": ...}]}
-    2. Short-Lived -> Long-Lived Access Token (60 hari) via graph.instagram.com
-    3. Ambil data profil dasar akun sendiri (id, username)
-    4. Simpan ke database terenkripsi tanpa pernah mencetak/me-log token.
+    Menukar Authorization Code dengan Long-Lived Token via Facebook Login & Instagram Graph API.
+    Alur sama persis dengan Archive_sosmed/streamlit-sosmed:
+    1. Code -> Short-Lived Access Token via https://graph.facebook.com/v21.0/oauth/access_token
+    2. Short-Lived -> Long-Lived Token (60 hari) via fb_exchange_token
+    3. Cari Instagram Business Account yang terhubung ke Facebook Page
+    4. Simpan ke database SQLite terenkripsi dan token.json
     """
     if not INSTAGRAM_APP_ID or not INSTAGRAM_APP_SECRET:
         raise OAuthError("INSTAGRAM_APP_ID dan INSTAGRAM_APP_SECRET belum diisi di konfigurasi.")
 
-    # Instagram terkadang menyematkan '#_' di akhir parameter code
-    clean_code = code.split("#_")[0]
+    clean_code = code.split("#")[0].strip()
 
-    # Langkah 1: Tukar code dengan short-lived token
-    short_lived_url = "https://api.instagram.com/oauth/access_token"
-    payload = {
+    # 1. Tukar code dengan token via Facebook OAuth
+    params = {
         "client_id": INSTAGRAM_APP_ID,
         "client_secret": INSTAGRAM_APP_SECRET,
-        "grant_type": "authorization_code",
         "redirect_uri": redirect_uri,
         "code": clean_code
     }
 
     try:
-        resp = requests.post(short_lived_url, data=payload, timeout=15)
+        resp = requests.get(TOKEN_URL, params=params, timeout=15)
         data = resp.json()
     except Exception as e:
-        # Jangan masukkan str(e) karena bisa memuat URL/secret
-        raise OAuthError(f"Gagal menghubungi server Instagram ({e.__class__.__name__}).")
+        raise OAuthError(f"Gagal menghubungi server Facebook/Instagram ({e.__class__.__name__}).")
 
-    # Parsing DUA format respons token pendek:
-    short_token: Optional[str] = None
-    user_id: str = ""
-
-    if isinstance(data, dict):
-        # Format 1: Format Datar {"access_token": "...", "user_id": ...}
-        if "access_token" in data:
-            short_token = data["access_token"]
-            user_id = str(data.get("user_id", ""))
-        # Format 2: Format Terbungkus List {"data": [{"access_token": "...", "user_id": ...}]}
-        elif "data" in data and isinstance(data["data"], list) and len(data["data"]) > 0:
-            first_item = data["data"][0]
-            if isinstance(first_item, dict) and "access_token" in first_item:
-                short_token = first_item["access_token"]
-                user_id = str(first_item.get("user_id", ""))
-        # Format 2b: Terbungkus Dict {"data": {"access_token": "...", "user_id": ...}}
-        elif "data" in data and isinstance(data["data"], dict) and "access_token" in data["data"]:
-            short_token = data["data"]["access_token"]
-            user_id = str(data["data"].get("user_id", ""))
-
-    if resp.status_code != 200 or not short_token:
-        raw_err = data.get("error_message") or data.get("error", {}).get("message", "Gagal mendapatkan short-lived token")
+    if resp.status_code != 200 or "access_token" not in data:
+        raw_err = data.get("error", {}).get("message", "Gagal menukar authorization code")
         raise OAuthError(f"Instagram OAuth error: {_clean_error_message(raw_err)}")
 
-    # Langkah 2: Tukar short-lived token menjadi long-lived token (60 hari)
-    long_lived_url = "https://graph.instagram.com/access_token"
-    params = {
-        "grant_type": "ig_exchange_token",
+    short_token = data["access_token"]
+    expires_in = int(data.get("expires_in", 3600))
+    token_type = data.get("token_type", "bearer")
+
+    # 2. Tukar short-lived token ke long-lived token (60 hari)
+    long_params = {
+        "grant_type": "fb_exchange_token",
+        "client_id": INSTAGRAM_APP_ID,
         "client_secret": INSTAGRAM_APP_SECRET,
-        "access_token": short_token
+        "fb_exchange_token": short_token
     }
 
+    final_token = short_token
     try:
-        resp_long = requests.get(long_lived_url, params=params, timeout=15)
-        data_long = resp_long.json()
-    except Exception as e:
-        raise OAuthError(f"Gagal menghubungi endpoint long-lived Instagram ({e.__class__.__name__}).")
-
-    if resp_long.status_code != 200 or "access_token" not in data_long:
-        raw_err = data_long.get("error", {}).get("message", "Gagal menukar ke long-lived token")
-        raise OAuthError(f"Instagram Long-Lived Token error: {_clean_error_message(raw_err)}")
-
-    long_token = data_long["access_token"]
-    expires_in = int(data_long.get("expires_in", 5184000))  # Default 60 hari
-    expires_at = int(time.time()) + expires_in
-
-    # Langkah 3: Ambil username akun pengguna sendiri
-    username = user_id
-    try:
-        profile_url = "https://graph.instagram.com/v21.0/me"
-        p_resp = requests.get(profile_url, params={"fields": "id,username,name", "access_token": long_token}, timeout=10)
-        if p_resp.status_code == 200:
-            p_data = p_resp.json()
-            username = p_data.get("username", user_id)
-            user_id = str(p_data.get("id", user_id))
+        resp_long = requests.get(f"{GRAPH_URL}/oauth/access_token", params=long_params, timeout=15)
+        long_data = resp_long.json()
+        if resp_long.status_code == 200 and "access_token" in long_data:
+            final_token = long_data["access_token"]
+            expires_in = int(long_data.get("expires_in", 5184000))
+            token_type = long_data.get("token_type", "bearer")
     except Exception:
-        # Jika query profile gagal, tetap lanjutkan dengan user_id
         pass
 
-    # Langkah 4: Simpan ke storage terenkripsi
-    storage.save_token(
-        platform="instagram",
-        account_id=user_id,
-        username=username,
-        access_token=long_token,
-        refresh_token=None,  # Instagram long-lived token direfresh langsung menggunakan dirinya sendiri
-        expires_at=expires_at,
-        scopes="instagram_business_basic"
-    )
-
-    return {
-        "platform": "instagram",
-        "account_id": user_id,
-        "username": username,
-        "expires_at": expires_at
-    }
+    # 3. Simpan dan hubungkan akun Instagram
+    return save_manual_instagram_token(final_token, expires_in=expires_in, token_type=token_type)
 
 
 TIKTOK_TOKEN_JSON_FILE = os.path.join(storage.BASE_DIR, ".tiktok_token.json")
@@ -463,6 +519,18 @@ def get_valid_token(platform: str) -> str:
     """
     platform = platform.lower().strip()
     record = storage.get_token_record(platform)
+    if not record and platform == "instagram":
+        # Coba auto-load dari token.json jika ada
+        if os.path.exists(INSTAGRAM_TOKEN_JSON_FILE):
+            try:
+                with open(INSTAGRAM_TOKEN_JSON_FILE, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                if "access_token" in saved and saved["access_token"]:
+                    save_manual_instagram_token(saved["access_token"], int(saved.get("expires_in", 5184000)))
+                    record = storage.get_token_record("instagram")
+            except Exception:
+                pass
+
     if not record:
         raise OAuthError(f"Belum ada akun {platform.capitalize()} yang terhubung. Silakan lakukan otorisasi terlebih dahulu.")
 
@@ -479,11 +547,6 @@ def get_valid_token(platform: str) -> str:
     # REFRESH LOGIC: INSTAGRAM
     # ==========================
     if platform == "instagram":
-        # Aturan resmi Meta:
-        # - Long-lived token berlaku 60 hari.
-        # - Token HANYA dapat diperbarui jika usianya sudah minimal 24 jam (created_at <= now - 86400).
-        # - Token belum boleh kedaluwarsa sepenuhnya (expires_at > now).
-        # - Rekomendasi refresh: ketika sisa masa berlaku < 15 hari.
         remaining_seconds = expires_at - now
         token_age_seconds = now - created_at
 
@@ -491,16 +554,17 @@ def get_valid_token(platform: str) -> str:
             if remaining_seconds <= 0:
                 raise OAuthError("Token Instagram telah kedaluwarsa penuh (> 60 hari). Pengguna harus menghubungkan ulang akun.")
 
-            refresh_url = "https://graph.instagram.com/refresh_access_token"
+            refresh_url = f"{GRAPH_URL}/oauth/access_token"
             params = {
-                "grant_type": "ig_refresh_token",
-                "access_token": access_token
+                "grant_type": "fb_exchange_token",
+                "client_id": INSTAGRAM_APP_ID,
+                "client_secret": INSTAGRAM_APP_SECRET,
+                "fb_exchange_token": access_token
             }
             try:
                 resp = requests.get(refresh_url, params=params, timeout=15)
                 data = resp.json()
             except Exception as e:
-                # Jika jaringan bermasalah namun token masih valid, gunakan token yang ada
                 if remaining_seconds > 3600:
                     return access_token
                 raise OAuthError(f"Gagal merefresh token Instagram ({e.__class__.__name__}).")
@@ -519,9 +583,9 @@ def get_valid_token(platform: str) -> str:
                     expires_at=new_expires_at,
                     scopes=scopes
                 )
+                export_instagram_token_to_json(new_token, new_expires_in)
                 return new_token
             else:
-                # Jika refresh gagal namun token masih punya sisa waktu, tetap kembalikan token
                 if remaining_seconds > 3600:
                     return access_token
                 raw_err = data.get("error", {}).get("message", "Gagal merefresh token")

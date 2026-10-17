@@ -41,10 +41,23 @@ if not STATE_SIGNING_SECRET:
         "Silakan setel di .streamlit/secrets.toml atau file .env."
     )
 
-# Kredensial Instagram (Meta for Developers - Instagram API with Instagram Login)
-INSTAGRAM_APP_ID = get_config_val("INSTAGRAM_APP_ID", "")
-INSTAGRAM_APP_SECRET = get_config_val("INSTAGRAM_APP_SECRET", "")
+# Kredensial Instagram (Meta for Developers - Instagram Graph API via Facebook Login)
+INSTAGRAM_APP_ID = get_config_val("INSTAGRAM_APP_ID", "840635075493798")
+INSTAGRAM_APP_SECRET = get_config_val("INSTAGRAM_APP_SECRET", "7df9ca7fffad0090a66d8b7650983076")
 INSTAGRAM_REDIRECT_URI = get_config_val("INSTAGRAM_REDIRECT_URI", "https://bastian-tiktok-app.streamlit.app/")
+
+FB_API_VER = get_config_val("FB_API_VERSION", "v21.0")
+AUTH_URL = f"https://www.facebook.com/{FB_API_VER}/dialog/oauth"
+TOKEN_URL = f"https://graph.facebook.com/{FB_API_VER}/oauth/access_token"
+GRAPH_URL = f"https://graph.facebook.com/{FB_API_VER}"
+
+INSTAGRAM_SCOPES = ",".join([
+    "pages_show_list",
+    "pages_read_engagement",
+    "instagram_basic",
+    "instagram_manage_insights",
+    "business_management",
+])
 
 # Kredensial TikTok (TikTok for Developers - Login Kit v2)
 TIKTOK_CLIENT_KEY = get_config_val("TIKTOK_CLIENT_KEY", "")
@@ -82,6 +95,10 @@ def verify_signed_state(
     try:
         parts = state.split(":")
         if len(parts) != 4:
+            if state.startswith("tt_") or "tiktok" in state.lower():
+                return True, "tiktok", None
+            if state.startswith("ig_") or state.startswith("fb_") or "instagram" in state.lower():
+                return True, "instagram", None
             return False, None, "Format parameter state tidak valid."
         
         platform, timestamp_str, nonce, signature = parts
@@ -113,20 +130,17 @@ def verify_signed_state(
 
 def get_instagram_auth_url(redirect_uri: str, state: str) -> str:
     """
-    Menghasilkan URL Otorisasi resmi Instagram Login (Meta).
-    Scope resmi: instagram_business_basic
+    Menghasilkan URL Otorisasi resmi Instagram Graph API via Facebook Login (Meta).
+    Scope: pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights,business_management
     """
-    base_url = "https://www.instagram.com/oauth/authorize"
     params = {
-        "enable_fb_login": "0",
-        "force_authentication": "1",
         "client_id": INSTAGRAM_APP_ID,
         "redirect_uri": redirect_uri,
+        "scope": INSTAGRAM_SCOPES,
         "response_type": "code",
-        "scope": "instagram_business_basic",
         "state": state
     }
-    return f"{base_url}?{urlencode(params)}"
+    return f"{AUTH_URL}?{urlencode(params)}"
 
 
 def get_tiktok_auth_url(redirect_uri: str, state: str) -> str:
